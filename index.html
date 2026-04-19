@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="家計簿">
+  <title>家計簿</title>
+
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#378ADD">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+</head>
+<body>
+  <div class="header"><h1>家計簿</h1></div>
+
+  <div id="t-record" class="sec active">
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric-label">今月収入</div>
+        <div class="metric-value" style="color:var(--green)" id="m-inc">¥0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">今月支出</div>
+        <div class="metric-value" style="color:var(--red)" id="m-exp">¥0</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">収支</div>
+        <div class="metric-value" id="m-bal">¥0</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="preset-row">
+        <button class="preset-btn sel" onclick="setPreset('expense')" id="pr-expense">通常の支出</button>
+        <button class="preset-btn" onclick="setPreset('income')" id="pr-income">収入</button>
+        <button class="preset-btn" onclick="setPreset('repay')" id="pr-repay">負債の返済</button>
+        <button class="preset-btn" onclick="setPreset('transfer')" id="pr-transfer">口座振替</button>
+        <button class="preset-btn" onclick="setPreset('point')" id="pr-point">ポイント払い</button>
+      </div>
+
+      <div class="hint" id="f-hint"></div>
+
+      <div class="quick-row">
+        <button type="button" class="quick-btn" onclick="setQuickDate(0)">今日</button>
+        <button type="button" class="quick-btn" onclick="setQuickDate(-1)">昨日</button>
+        <button type="button" class="quick-btn" onclick="applyLastUsedForm()">前回入力を反映</button>
+      </div>
+
+      <div class="fg2">
+        <div class="fgrp">
+          <label>日付</label>
+          <input type="date" id="f-date">
+        </div>
+      
+        <div class="fgrp">
+          <label>金額（円）</label>
+          <div class="amt-wrap">
+            <span class="amt-prefix">¥</span>
+            <input type="number" id="f-amt" inputmode="numeric" placeholder="0" min="0">
+          </div>
+        </div>
+      </div>
+      
+      <div class="fgrp">
+        <label>メモ</label>
+        <input type="text" id="f-desc" placeholder="例：スーパーで買い物">
+      </div>
+      
+      <div class="form-note">
+        メモは空でもOKです。空の場合は借方科目名をタイトル代わりに表示します。
+      </div>
+
+      <div class="divrow" id="f-dr-label">借方</div>
+      <div class="fg2">
+        <div class="fgrp">
+          <label>勘定科目</label>
+          <select id="f-dr"></select>
+        </div>
+        <div class="fgrp">
+          <label>補足</label>
+          <input type="text" id="f-dr-note" placeholder="">
+        </div>
+      </div>
+
+      <div class="divrow" id="f-cr-label">貸方</div>
+      <div class="fg2">
+        <div class="fgrp">
+          <label>勘定科目</label>
+          <select id="f-cr"></select>
+        </div>
+        <div class="fgrp">
+          <label>補足</label>
+          <input type="text" id="f-cr-note" placeholder="">
+        </div>
+      </div>
+
+      <div id="edit-bar" class="editbar"></div>
+
+      <div id="quick-credit-wrap" class="quick-credit-wrap"></div>
+
+      <button class="btnadd" id="submit-btn" onclick="addEntry()">追加</button>
+
+      <div class="sub-actions">
+        <button class="btnsub" type="button" onclick="cancelEdit()">編集をキャンセル</button>
+        <button class="btnsub" type="button" onclick="exportData()">バックアップを書き出し</button>
+      </div>
+
+      <div class="sub-actions">
+        <button class="btnsub" type="button" onclick="document.getElementById('import-file').click()">バックアップを読み込む</button>
+      </div>
+
+      <input type="file" id="import-file" accept="application/json" style="display:none" onchange="importData(event)">
+    </div>
+  </div>
+
+  <div id="t-list" class="sec">
+    <div class="lhdr">
+      <span class="lhdr-title" id="list-lbl"></span>
+      <div class="mnav">
+        <button onclick="chMon(-1)">◀</button>
+        <button onclick="chMon(1)">▶</button>
+      </div>
+    </div>
+    <div class="list-tools">
+      <input
+        type="text"
+        id="list-search"
+        class="list-search"
+        placeholder="メモ・科目で検索"
+        oninput="renderList()"
+      >
+      <select id="list-category-filter" class="list-filter" onchange="renderList()">
+        <option value="">すべての科目</option>
+      </select>
+    </div>
+    <div id="elist"></div>
+  </div>
+
+  <div id="t-graph" class="sec">
+    <div class="gchart-card">
+      <div class="gtitle">月次収支（過去6ヶ月）</div>
+      <div class="lgd">
+        <span><span class="ldot" style="background:#1D9E75;"></span>収入</span>
+        <span><span class="ldot" style="background:#D85A30;"></span>支出</span>
+      </div>
+      <div style="position:relative;width:100%;height:180px;"><canvas id="gc-monthly"></canvas></div>
+    </div>
+
+    <div class="gchart-card">
+      <div class="gtitle">今月のカテゴリ別支出</div>
+      <div id="gc-catbars"></div>
+    </div>
+
+    <div class="gchart-card">
+      <div class="gtitle">今月の支払方法別</div>
+      <div class="lgd" id="gc-paylgd"></div>
+      <div style="position:relative;width:100%;height:180px;"><canvas id="gc-pay"></canvas></div>
+    </div>
+  </div>
+
+  <div id="t-summary" class="sec">
+    <div class="ctrl">
+      <label>表示月数</label>
+      <select id="s-months" onchange="renderSummary()">
+        <option value="3">3ヶ月</option>
+        <option value="6" selected>6ヶ月</option>
+        <option value="12">12ヶ月</option>
+      </select>
+    </div>
+    <div class="tbl-out"><table id="stbl"></table></div>
+  </div>
+
+  <div id="t-fs" class="sec">
+    <div class="ctrl">
+      <label>対象月</label>
+      <select id="fs-month" onchange="renderFS()"></select>
+    </div>
+
+    <div class="gchart-card">
+      <div class="gtitle">月次締め</div>
+      <div id="monthly-close-wrap"></div>
+    </div>
+
+    <div class="fs-tabs">
+      <button class="fs-tab active" onclick="swFS('bs')">貸借対照表</button>
+      <button class="fs-tab" onclick="swFS('pl')">損益計算書</button>
+    </div>
+
+    <div id="fs-bs" class="fs-sec active">
+      <div id="bs-wrap"></div>
+      <div class="gchart-card">
+        <div class="gtitle">純資産の推移（過去12ヶ月）</div>
+        <div style="position:relative;width:100%;height:180px;"><canvas id="bs-chart"></canvas></div>
+      </div>
+    </div>
+
+    <div id="fs-pl" class="fs-sec">
+      <div class="pl-wrap" id="pl-wrap"></div>
+      <div class="gchart-card">
+        <div class="gtitle">収入・費用・利益の推移（過去12ヶ月）</div>
+        <div class="lgd" id="pl-lgd"></div>
+        <div style="position:relative;width:100%;height:190px;"><canvas id="pl-chart"></canvas></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="t-settings" class="sec">
+    <div class="card">
+      <div class="lhdr" style="margin-bottom:10px;">
+        <span class="lhdr-title">外部サーバー保存</span>
+      </div>
+      <div class="hint" style="margin-bottom:16px;">
+        Cloudflare Workers + KV に暗号化済みデータを保存・復元します。暗号化パスフレーズはこの端末に保存しません。
+      </div>
+
+      <div class="fgrp">
+        <label>Cloudflare Worker URL</label>
+        <input type="url" id="sync-endpoint" placeholder="https://example.workers.dev">
+      </div>
+
+      <div class="fgrp">
+        <label>アクセストークン</label>
+        <input type="password" id="sync-token" placeholder="Cloudflare Workerに設定したトークン">
+      </div>
+
+      <div class="fgrp">
+        <label>暗号化パスフレーズ</label>
+        <input type="password" id="sync-passphrase" placeholder="保存・読込時だけ入力">
+      </div>
+
+      <div class="form-note">
+        パスフレーズはタブを開いている間だけ記憶されます。忘れるとサーバーのデータを復元できません。
+      </div>
+
+      <div id="sync-status" class="sync-status"></div>
+
+      <div class="sub-actions">
+        <button class="btnsub" type="button" data-sync-action onclick="saveSyncConfig()">設定を保存</button>
+        <button class="btnsub" type="button" data-sync-action onclick="uploadToServer()">サーバーへ保存</button>
+      </div>
+      <div class="sub-actions">
+        <button class="btnsub" type="button" data-sync-action onclick="downloadFromServer()">サーバーから読み込む</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="lhdr" style="margin-bottom:10px;">
+        <span class="lhdr-title">勘定科目の管理</span>
+      </div>
+      <div class="hint" style="margin-bottom:16px;">
+        使っていない科目は削除、過去の記録で使っている科目は無効化されます。<br>
+        無効化した科目は過去データには残り、新規入力候補からは消えます。
+      </div>
+  
+      <div class="settings-wrap">
+        <div class="acct-box">
+          <div class="acct-box-title">資産</div>
+          <div id="acct-list-asset"></div>
+          <div class="acct-add-row">
+            <input type="text" id="acct-input-asset" placeholder="例：PayPay残高">
+            <button type="button" onclick="addAccount('asset')">追加</button>
+          </div>
+        </div>
+  
+        <div class="acct-box">
+          <div class="acct-box-title">負債</div>
+          <div id="acct-list-liability"></div>
+          <div class="acct-add-row">
+            <input type="text" id="acct-input-liability" placeholder="例：メルペイスマート払い">
+            <button type="button" onclick="addAccount('liability')">追加</button>
+          </div>
+        </div>
+  
+        <div class="acct-box">
+          <div class="acct-box-title">収入</div>
+          <div id="acct-list-income"></div>
+          <div class="acct-add-row">
+            <input type="text" id="acct-input-income" placeholder="例：副収入">
+            <button type="button" onclick="addAccount('income')">追加</button>
+          </div>
+        </div>
+  
+        <div class="acct-box">
+          <div class="acct-box-title">費用</div>
+          <div id="acct-list-expense"></div>
+          <div class="acct-add-row">
+            <input type="text" id="acct-input-expense" placeholder="例：サブスク">
+            <button type="button" onclick="addAccount('expense')">追加</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <nav class="tab-bar">
+    <button class="tab-btn active" onclick="sw('record')" id="tb-record">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>記録
+    </button>
+    <button class="tab-btn" onclick="sw('list')" id="tb-list">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>一覧
+    </button>
+    <button class="tab-btn" onclick="sw('graph')" id="tb-graph">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>グラフ
+    </button>
+    <button class="tab-btn" onclick="sw('summary')" id="tb-summary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>集計
+    </button>
+    <button class="tab-btn" onclick="sw('fs')" id="tb-fs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>財務
+    </button>
+    <button class="tab-btn" onclick="sw('settings')" id="tb-settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8.92 4.6H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.36.49.58 1.08.6 1.69v.62c-.02.61-.24 1.2-.6 1.69z"></path>
+      </svg>設定
+    </button>
+  </nav>
+
+  <script src="app.js"></script>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('./service-worker.js')
+          .catch(err => console.error('Service Worker registration failed:', err));
+      });
+    }
+  </script>
+
+</body>
+</html>
