@@ -13,7 +13,7 @@ let monthlyClosings = loadMonthlyClosings();
 let sessionSyncPassphrase = '';
 
 const defaultAccounts = {
-  asset: ['現金','交通・電子マネー','SBI新生銀行','住信SBIネット銀行','ゆうちょ銀行','三井住友銀行','楽天銀行','中国銀行','NISA','固定資産','その他資産'],
+  asset: ['現金','交通・電子マネー','SBI新生銀行','住信SBIネット銀行','ゆうちょ銀行','三井住友銀行','楽天銀行','中国銀行','NISA','固定資産','その他資産','ポイント'],
   liability: ['クレジットカード','奨学金','Paidy','消費者金融','その他負債'],
   income: ['給与','賞与','配当金','雑収入','銀行利息','プラス帳尻合わせ'],
   expense: ['食費','日用品費','家賃','水道代','ガス代','電気代','交通費','通信費','娯楽費','外食費','自己投資','沙奈費','交際費','旅費','被服費','美容費','保険','医療費','特別費','生活費','雑費','仕送り','税金等','マイナス帳尻合わせ']
@@ -46,6 +46,11 @@ const defaultExpenseColors = {
   'マイナス帳尻合わせ':'#5F5E5A'
 };
 
+const POINT_ASSET_ACCOUNT = 'ポイント';
+const POINT_ADJUSTMENT_INCOME = 'プラス帳尻合わせ';
+const POINT_ROLE_ADJUSTMENT = 'point-adjustment';
+const POINT_ROLE_EXPENSE = 'point-expense';
+
 let accountSettings = loadAccountSettings();
 
 const payColors = {
@@ -57,6 +62,7 @@ const payColors = {
   三井住友銀行:'#1D9E75',
   楽天銀行:'#D85A30',
   中国銀行:'#BA7517',
+  ポイント:'#EF9F27',
   クレジットカード:'#3C3489',
   Paidy:'#D4537E'
 };
@@ -108,11 +114,24 @@ function loadAccountSettings(){
     };
   }
   return {
-    asset: normalizeAccountBlock(raw.asset || defaultAccounts.asset, 'asset'),
+    asset: ensureAccount(normalizeAccountBlock(raw.asset || defaultAccounts.asset, 'asset'), 'asset', POINT_ASSET_ACCOUNT),
     liability: normalizeAccountBlock(raw.liability || defaultAccounts.liability, 'liability'),
-    income: normalizeAccountBlock(raw.income || defaultAccounts.income, 'income'),
+    income: ensureAccount(normalizeAccountBlock(raw.income || defaultAccounts.income, 'income'), 'income', POINT_ADJUSTMENT_INCOME),
     expense: normalizeAccountBlock(raw.expense || defaultAccounts.expense, 'expense')
   };
+}
+
+function ensureAccount(items, type, name) {
+  const normalized = Array.isArray(items) ? [...items] : [];
+  const existing = normalized.find(item => item.name === name);
+  if (existing) {
+    existing.active = true;
+  } else {
+    const account = { name, active:true };
+    if (type === 'expense') account.color = defaultExpenseColors[name] || randomColor();
+    normalized.push(account);
+  }
+  return normalized;
 }
 
 function saveAccountSettings(){
@@ -191,14 +210,11 @@ function getPresetConfig(){
     point: {
       drLabel:'借方（費目）',
       crLabel:'貸方（支払方法）',
-      hint:'①「収入/プラス帳尻合わせ→その他資産」でポイント分を資産に追加 ②「費目→その他資産」で支払い',
+      hint:'ポイント払いは「ポイント発生」と「ポイントから費用への支払い」をペアで自動記録します。',
       drOpts:[{ g:'費用', opts:getAccounts('expense') }],
-      crOpts:[
-        { g:'資産', opts:getAccounts('asset') },
-        { g:'収入', opts:getAccounts('income') }
-      ],
+      crOpts:[{ g:'資産', opts:getAccounts('asset') }],
       drDef:getAccounts('expense')[0] || '',
-      crDef:getAccounts('asset').includes('その他資産') ? 'その他資産' : (getAccounts('asset')[0] || '')
+      crDef:getAccounts('asset').includes('ポイント') ? 'ポイント' : (getAccounts('asset')[0] || '')
     }
   };
 }
@@ -316,7 +332,6 @@ function getQuickCreditCandidates() {
   const remembered = uiPrefs.lastCreditByPreset?.[preset];
   const allAsset = getAccounts('asset');
   const allLiability = getAccounts('liability');
-  const allIncome = getAccounts('income');
 
   let candidates = [];
 
@@ -329,7 +344,7 @@ function getQuickCreditCandidates() {
   } else if (preset === 'transfer') {
     candidates = allAsset;
   } else if (preset === 'point') {
-    candidates = [...allAsset, ...allIncome];
+    candidates = allAsset;
   }
 
   const uniq = Array.from(new Set(candidates.filter(Boolean)));
@@ -611,11 +626,11 @@ function renderList() {
   }
 
   el.innerHTML = es.map(e => `
-    <div class="entry">
+    <div class="entry ${isPointAdjustmentEntry(e) ? 'entry-auto' : ''}">
       <div class="etop">
         <div>
           <div class="ememo">${escapeHtml(e.desc || e.drCat)}</div>
-          <div class="edate">${escapeHtml(e.date)}</div>
+          <div class="edate">${escapeHtml(e.date)}${isPointLinkedEntry(e) ? ' · ポイント払い' : ''}${isPointAdjustmentEntry(e) ? ' · 自動補助' : ''}</div>
         </div>
         <div class="eright-actions">
           <div class="eamt">${fmt(e.amount)}</div>
@@ -642,11 +657,16 @@ function renderList() {
 
 function delEntry(id) {
   const entry = entries.find(e => e.id === id);
-  if (entry && blockIfClosedMonth(monthKeyFromDate(entry.date), '削除')) return;
-  if (!confirm('削除しますか？')) return;
-  entries = entries.filter(e => e.id !== id);
+  const targets = getLinkedPointEntries(entry);
+  if (targets.some(e => blockIfClosedMonth(monthKeyFromDate(e.date), '削除'))) return;
+  const message = targets.length > 1
+    ? 'ポイント払いのペア仕訳をまとめて削除しますか？'
+    : '削除しますか？';
+  if (!confirm(message)) return;
+  const targetIds = new Set(targets.map(e => e.id));
+  entries = entries.filter(e => !targetIds.has(e.id));
   saveEntries();
-  if (editingId === id) cancelEdit(false);
+  if (targetIds.has(editingId)) cancelEdit(false);
   refreshActiveTab();
   renderSettings();
 }
@@ -1057,6 +1077,61 @@ function sw(t) {
   if (t === 'settings') renderSettings();
 }
 
+function newEntryId() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function isPointLinkedEntry(entry) {
+  return entry?.preset === 'point' && entry.linkedId;
+}
+
+function isPointExpenseEntry(entry) {
+  return isPointLinkedEntry(entry) && entry.pointRole === POINT_ROLE_EXPENSE;
+}
+
+function isPointAdjustmentEntry(entry) {
+  return isPointLinkedEntry(entry) && entry.pointRole === POINT_ROLE_ADJUSTMENT;
+}
+
+function getLinkedPointEntries(entry) {
+  if (!isPointLinkedEntry(entry)) return [entry].filter(Boolean);
+  return entries.filter(e => e.linkedId === entry.linkedId);
+}
+
+function getPointExpenseEntry(entry) {
+  if (!isPointLinkedEntry(entry)) return entry;
+  return getLinkedPointEntries(entry).find(isPointExpenseEntry) || entry;
+}
+
+function makePointEntries(data, linkedId = newEntryId(), expenseId = newEntryId()) {
+  const pointAsset = data.crCat || POINT_ASSET_ACCOUNT;
+  const adjustmentDesc = data.desc ? `${data.desc}（ポイント発生）` : 'ポイント発生';
+  const adjustmentNote = data.crNote || 'ポイント払いの自動補助';
+
+  return [
+    {
+      id:newEntryId(),
+      date:data.date,
+      amount:data.amount,
+      desc:adjustmentDesc,
+      drCat:pointAsset,
+      drNote:adjustmentNote,
+      crCat:POINT_ADJUSTMENT_INCOME,
+      crNote:adjustmentNote,
+      preset:'point',
+      linkedId,
+      pointRole:POINT_ROLE_ADJUSTMENT
+    },
+    {
+      ...data,
+      id:expenseId,
+      preset:'point',
+      linkedId,
+      pointRole:POINT_ROLE_EXPENSE
+    }
+  ];
+}
+
 function addEntry() {
   const date = document.getElementById('f-date').value;
   const amount = parseFloat(document.getElementById('f-amt').value);
@@ -1094,8 +1169,24 @@ function addEntry() {
       cancelEdit(false);
       return;
     }
-    if (blockIfClosedMonth(monthKeyFromDate(entries[idx].date), '更新')) return;
-    entries[idx] = { ...entries[idx], ...data };
+    const original = entries[idx];
+    const originalLinked = getLinkedPointEntries(original);
+    if (originalLinked.some(e => blockIfClosedMonth(monthKeyFromDate(e.date), '更新'))) return;
+
+    if (currentPreset === 'point') {
+      const linkedId = isPointLinkedEntry(original) ? original.linkedId : newEntryId();
+      const expenseId = isPointLinkedEntry(original)
+        ? getPointExpenseEntry(original).id
+        : original.id;
+      const pointEntries = makePointEntries(data, linkedId, expenseId);
+      const linkedIds = new Set(originalLinked.map(e => e.id));
+      entries = entries.filter(e => !linkedIds.has(e.id));
+      entries.push(...pointEntries);
+    } else {
+      const linkedIds = new Set(originalLinked.map(e => e.id));
+      entries = entries.filter(e => !linkedIds.has(e.id));
+      entries.push({ ...original, ...data, preset:currentPreset, linkedId:undefined, pointRole:undefined });
+    }
     saveEntries();
     cancelEdit(false);
     refreshActiveTab();
@@ -1104,7 +1195,11 @@ function addEntry() {
     return;
   }
 
-  entries.push({ id:`${Date.now()}-${Math.random().toString(16).slice(2, 8)}`, ...data });
+  if (currentPreset === 'point') {
+    entries.push(...makePointEntries(data));
+  } else {
+    entries.push({ id:newEntryId(), ...data });
+  }
   saveEntries();
   refreshActiveTab();
   resetForm();
@@ -1115,14 +1210,15 @@ function addEntry() {
 }
 
 function startEdit(id) {
-  const entry = entries.find(e => e.id === id);
+  const clickedEntry = entries.find(e => e.id === id);
+  const entry = getPointExpenseEntry(clickedEntry);
   if (!entry) {
     alert('編集対象が見つかりませんでした');
     return;
   }
-  if (blockIfClosedMonth(monthKeyFromDate(entry.date), '編集')) return;
+  if (getLinkedPointEntries(entry).some(e => blockIfClosedMonth(monthKeyFromDate(e.date), '編集'))) return;
 
-  editingId = id;
+  editingId = entry.id;
   setPreset(entry.preset || guessPreset(entry));
 
   document.getElementById('f-date').value = entry.date || '';
@@ -1138,7 +1234,8 @@ function startEdit(id) {
   document.getElementById('submit-btn').textContent = '更新';
   const editBar = document.getElementById('edit-bar');
   editBar.classList.add('show');
-  editBar.innerHTML = `編集中です。<br>${escapeHtml(entry.desc || entry.drCat)} / ${escapeHtml(entry.date)} / ${fmt(entry.amount)}`;
+  const pairNote = isPointLinkedEntry(entry) ? '<br>ポイント発生の補助仕訳も一緒に更新します。' : '';
+  editBar.innerHTML = `編集中です。<br>${escapeHtml(entry.desc || entry.drCat)} / ${escapeHtml(entry.date)} / ${fmt(entry.amount)}${pairNote}`;
 
   sw('record');
   window.scrollTo({ top:0, behavior:'smooth' });
@@ -1168,6 +1265,7 @@ function guessPreset(entry) {
   const liabilities = getAccounts('liability', true);
   const incomes = getAccounts('income', true);
 
+  if (entry.preset === 'point' || entry.linkedId && entry.pointRole) return 'point';
   if (incomes.includes(entry.crCat) && assets.includes(entry.drCat)) return 'income';
   if (liabilities.includes(entry.drCat) && assets.includes(entry.crCat)) return 'repay';
   if (assets.includes(entry.drCat) && assets.includes(entry.crCat)) return 'transfer';
@@ -1500,7 +1598,9 @@ function normalizeEntry(e) {
     drNote: String(e.drNote || ''),
     crCat: String(e.crCat),
     crNote: String(e.crNote || ''),
-    preset: String(e.preset || guessPreset(e))
+    preset: String(e.preset || guessPreset(e)),
+    linkedId: e.linkedId ? String(e.linkedId) : undefined,
+    pointRole: e.pointRole ? String(e.pointRole) : undefined
   };
 }
 
