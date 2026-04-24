@@ -6,11 +6,17 @@ let gMonthly = null;
 let gPay = null;
 let gBS = null;
 let gPL = null;
+let gCostType = null;
 let editingId = null;
+let editingBudgetEventId = null;
 let uiPrefs = JSON.parse(localStorage.getItem('kakeibo_ui_prefs') || '{}');
 let syncSettings = loadSyncSettings();
 let monthlyClosings = loadMonthlyClosings();
+let monthlyBudgets = loadMonthlyBudgets();
+let budgetEvents = loadBudgetEvents();
 let sessionSyncPassphrase = '';
+let budgetMonth = new Date();
+budgetMonth.setDate(1);
 
 const defaultAccounts = {
   asset: ['現金','交通・電子マネー','SBI新生銀行','住信SBIネット銀行','ゆうちょ銀行','三井住友銀行','楽天銀行','中国銀行','NISA','固定資産','その他資産','ポイント'],
@@ -44,6 +50,33 @@ const defaultExpenseColors = {
   仕送り:'#533AB7',
   税金等:'#444441',
   'マイナス帳尻合わせ':'#5F5E5A'
+};
+
+const defaultExpenseCostTypes = {
+  食費:'variable',
+  日用品費:'variable',
+  家賃:'fixed',
+  水道代:'fixed',
+  ガス代:'fixed',
+  電気代:'fixed',
+  交通費:'variable',
+  通信費:'fixed',
+  娯楽費:'variable',
+  外食費:'variable',
+  自己投資:'variable',
+  沙奈費:'variable',
+  交際費:'variable',
+  旅費:'variable',
+  被服費:'variable',
+  美容費:'variable',
+  保険:'fixed',
+  医療費:'variable',
+  特別費:'variable',
+  生活費:'variable',
+  雑費:'variable',
+  仕送り:'fixed',
+  税金等:'fixed',
+  'マイナス帳尻合わせ':'variable'
 };
 
 const POINT_ASSET_ACCOUNT = 'ポイント';
@@ -80,7 +113,7 @@ function normalizeAccountBlock(items, type){
     .map(item => {
       if (typeof item === 'string') {
         return type === 'expense'
-          ? { name:item, active:true, color:defaultExpenseColors[item] || randomColor() }
+          ? { name:item, active:true, color:defaultExpenseColors[item] || randomColor(), costType:defaultExpenseCostTypes[item] || 'variable' }
           : { name:item, active:true };
       }
       if (item && typeof item.name === 'string') {
@@ -90,6 +123,7 @@ function normalizeAccountBlock(items, type){
         };
         if (type === 'expense') {
           normalized.color = item.color || defaultExpenseColors[item.name] || randomColor();
+          normalized.costType = item.costType === 'fixed' ? 'fixed' : (defaultExpenseCostTypes[item.name] || 'variable');
         }
         return normalized;
       }
@@ -109,7 +143,8 @@ function loadAccountSettings(){
       expense: defaultAccounts.expense.map(name => ({
         name,
         active:true,
-        color: defaultExpenseColors[name] || randomColor()
+        color: defaultExpenseColors[name] || randomColor(),
+        costType: defaultExpenseCostTypes[name] || 'variable'
       }))
     };
   }
@@ -128,7 +163,10 @@ function ensureAccount(items, type, name) {
     existing.active = true;
   } else {
     const account = { name, active:true };
-    if (type === 'expense') account.color = defaultExpenseColors[name] || randomColor();
+    if (type === 'expense') {
+      account.color = defaultExpenseColors[name] || randomColor();
+      account.costType = defaultExpenseCostTypes[name] || 'variable';
+    }
     normalized.push(account);
   }
   return normalized;
@@ -147,6 +185,11 @@ function getAccounts(type, includeInactive = false){
 function getExpenseColor(name){
   const found = (accountSettings.expense || []).find(a => a.name === name);
   return found?.color || defaultExpenseColors[name] || '#888';
+}
+
+function getExpenseCostType(name) {
+  const found = (accountSettings.expense || []).find(a => a.name === name);
+  return found?.costType === 'fixed' ? 'fixed' : 'variable';
 }
 
 function hasAccount(type, name){
@@ -269,6 +312,32 @@ function saveMonthlyClosings() {
   markLocalChanged();
 }
 
+function loadMonthlyBudgets() {
+  const raw = JSON.parse(localStorage.getItem('kakeibo_monthly_budgets') || '{}');
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw)
+      .filter(([month]) => /^\d{4}-\d{2}$/.test(month))
+      .map(([month, value]) => [month, normalizeMonthlyBudget(value)])
+  );
+}
+
+function saveMonthlyBudgets() {
+  localStorage.setItem('kakeibo_monthly_budgets', JSON.stringify(monthlyBudgets));
+  markLocalChanged();
+}
+
+function loadBudgetEvents() {
+  const raw = JSON.parse(localStorage.getItem('kakeibo_budget_events') || '[]');
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normalizeBudgetEvent).filter(Boolean);
+}
+
+function saveBudgetEvents() {
+  localStorage.setItem('kakeibo_budget_events', JSON.stringify(budgetEvents));
+  markLocalChanged();
+}
+
 function saveUiPrefs() {
   localStorage.setItem('kakeibo_ui_prefs', JSON.stringify(uiPrefs));
 }
@@ -327,6 +396,114 @@ function updateListCategoryFilterOptions() {
   }
 }
 
+function updateListEventFilterOptions() {
+  const sel = document.getElementById('list-event-filter');
+  if (!sel) return;
+
+  const current = sel.value;
+  sel.innerHTML = '<option value="">すべてのイベント</option>' +
+    budgetEvents
+      .slice()
+      .sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')) || a.name.localeCompare(b.name, 'ja'))
+      .map(event => `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name)}</option>`)
+      .join('');
+
+  if (budgetEvents.some(event => event.id === current)) {
+    sel.value = current;
+  }
+}
+
+function renderEventOptions(selectedId = '') {
+  const sel = document.getElementById('f-event');
+  if (!sel) return;
+  const dateValue = document.getElementById('f-date')?.value || '';
+  const matches = [];
+  const others = [];
+
+  budgetEvents
+    .slice()
+    .sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')) || a.name.localeCompare(b.name, 'ja'))
+    .forEach(event => {
+      if (isEventDateMatch(event, dateValue)) matches.push(event);
+      else others.push(event);
+    });
+
+  const eventOption = event => {
+    const period = event.startDate || event.endDate
+      ? ` (${event.startDate || '未設定'} - ${event.endDate || '未設定'})`
+      : '';
+    return `<option value="${escapeHtml(event.id)}">${escapeHtml(event.name + period)}</option>`;
+  };
+
+  const parts = ['<option value="">イベントなし</option>'];
+  if (matches.length) {
+    parts.push(`<optgroup label="日付に合うイベント">${matches.map(eventOption).join('')}</optgroup>`);
+  }
+  if (others.length) {
+    parts.push(`<optgroup label="その他のイベント">${others.map(eventOption).join('')}</optgroup>`);
+  }
+  sel.innerHTML = parts.join('');
+
+  const availableIds = budgetEvents.map(event => event.id);
+  if (selectedId && availableIds.includes(selectedId)) {
+    sel.value = selectedId;
+  } else {
+    const suggestedId = getSuggestedEventId(dateValue);
+    sel.value = suggestedId || '';
+  }
+
+  renderEventHint();
+}
+
+function isEventDateMatch(event, dateValue) {
+  if (!dateValue) return false;
+  if (event.startDate && dateValue < event.startDate) return false;
+  if (event.endDate && dateValue > event.endDate) return false;
+  return true;
+}
+
+function getSuggestedEventId(dateValue) {
+  if (!dateValue) return '';
+  const matched = budgetEvents.filter(event => isEventDateMatch(event, dateValue));
+  return matched.length === 1 ? matched[0].id : '';
+}
+
+function renderEventHint() {
+  const hint = document.getElementById('f-event-hint');
+  const sel = document.getElementById('f-event');
+  const dateValue = document.getElementById('f-date')?.value || '';
+  if (!hint || !sel) return;
+
+  const selected = getBudgetEvent(sel.value);
+  const matched = budgetEvents.filter(event => isEventDateMatch(event, dateValue));
+
+  if (selected) {
+    if (dateValue && !isEventDateMatch(selected, dateValue)) {
+      hint.innerHTML = `選択中のイベント期間は ${escapeHtml(selected.startDate || '未設定')} - ${escapeHtml(selected.endDate || '未設定')} です。入力日が期間外です。`;
+      hint.style.color = 'var(--red-dark)';
+      return;
+    }
+    const spent = getEventSpend(selected.id);
+    hint.innerHTML = `選択中: ${escapeHtml(selected.name)} / 予算 ${fmt(selected.budget)} / 使用額 ${fmt(spent)}`;
+    hint.style.color = 'var(--text2)';
+    return;
+  }
+
+  if (matched.length === 1) {
+    hint.innerHTML = `この日付には ${escapeHtml(matched[0].name)} が候補です。`;
+    hint.style.color = 'var(--text2)';
+    return;
+  }
+  if (matched.length > 1) {
+    hint.innerHTML = `この日付に合うイベントが ${matched.length} 件あります。`;
+    hint.style.color = 'var(--text2)';
+    return;
+  }
+
+  hint.innerHTML = 'イベントを使わない支出は、そのまま「イベントなし」で記録できます。';
+  hint.style.color = 'var(--text2)';
+}
+
 function getQuickCreditCandidates() {
   const preset = currentPreset;
   const remembered = uiPrefs.lastCreditByPreset?.[preset];
@@ -338,7 +515,7 @@ function getQuickCreditCandidates() {
   if (preset === 'expense') {
     candidates = [...allLiability, ...allAsset];
   } else if (preset === 'income') {
-    candidates = allIncome;
+    candidates = getAccounts('income');
   } else if (preset === 'repay') {
     candidates = allAsset;
   } else if (preset === 'transfer') {
@@ -401,6 +578,8 @@ function setupFormInteractions() {
   const desc = document.getElementById('f-desc');
   const dr = document.getElementById('f-dr');
   const cr = document.getElementById('f-cr');
+  const date = document.getElementById('f-date');
+  const event = document.getElementById('f-event');
 
   if (amt && !amt.dataset.bound) {
     amt.addEventListener('keydown', e => {
@@ -437,6 +616,22 @@ function setupFormInteractions() {
       renderQuickCreditButtons();
     });
     cr.dataset.bound = '1';
+  }
+
+  if (date && !date.dataset.bound) {
+    date.addEventListener('change', () => {
+      const currentEventId = document.getElementById('f-event')?.value || '';
+      const keepCurrent = currentEventId && isEventDateMatch(getBudgetEvent(currentEventId) || {}, date.value);
+      renderEventOptions(keepCurrent ? currentEventId : '');
+    });
+    date.dataset.bound = '1';
+  }
+
+  if (event && !event.dataset.bound) {
+    event.addEventListener('change', () => {
+      renderEventHint();
+    });
+    event.dataset.bound = '1';
   }
 }
 
@@ -528,6 +723,75 @@ function monthKeyFromMonth(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
+function formatMonthLabel(date) {
+  return `${date.getFullYear()}年${date.getMonth() + 1}月`;
+}
+
+function getMonthlyBudget(monthKey) {
+  return monthlyBudgets[monthKey] || {};
+}
+
+function getBudgetEvent(eventId) {
+  return budgetEvents.find(event => event.id === eventId) || null;
+}
+
+function getEventSpend(eventId) {
+  return entries
+    .filter(e => e.eventId === eventId && isExpense(e))
+    .reduce((sum, e) => sum + e.amount, 0);
+}
+
+function getEventBreakdown(eventId, field) {
+  const map = {};
+  entries
+    .filter(e => e.eventId === eventId && isExpense(e))
+    .forEach(entry => {
+      const key = entry[field] || '未設定';
+      map[key] = (map[key] || 0) + entry.amount;
+    });
+
+  return Object.entries(map)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+}
+
+function getMonthBudgetTotals(monthDate) {
+  const monthKey = monthKeyFromMonth(monthDate);
+  const budget = getMonthlyBudget(monthKey);
+  const monthEntries = mEntries(monthDate).filter(isExpense);
+  const actualByCategory = {};
+  monthEntries.forEach(entry => {
+    actualByCategory[entry.drCat] = (actualByCategory[entry.drCat] || 0) + entry.amount;
+  });
+
+  const totals = {
+    budget:0,
+    actual:0,
+    fixedBudget:0,
+    fixedActual:0,
+    variableBudget:0,
+    variableActual:0
+  };
+
+  getAccounts('expense', true).forEach(name => {
+    const budgetValue = Number(budget[name] || 0);
+    const actualValue = Number(actualByCategory[name] || 0);
+    const costType = getExpenseCostType(name);
+
+    totals.budget += budgetValue;
+    totals.actual += actualValue;
+    if (costType === 'fixed') {
+      totals.fixedBudget += budgetValue;
+      totals.fixedActual += actualValue;
+    } else {
+      totals.variableBudget += budgetValue;
+      totals.variableActual += actualValue;
+    }
+  });
+
+  return totals;
+}
+
 function getClosing(monthKey) {
   return monthlyClosings.find(c => c.month === monthKey) || null;
 }
@@ -543,7 +807,7 @@ function blockIfClosedMonth(monthKey, actionLabel) {
 }
 
 function getActiveTab() {
-  const tabs = ['record','list','graph','summary','fs','settings'];
+  const tabs = ['record','list','graph','budget','summary','fs','settings'];
   return tabs.find(t => document.getElementById('tb-' + t)?.classList.contains('active')) || 'record';
 }
 
@@ -552,6 +816,7 @@ function refreshActiveTab() {
   const active = getActiveTab();
   if (active === 'list') renderList();
   if (active === 'graph') renderGraph();
+  if (active === 'budget') renderBudget();
   if (active === 'summary') renderSummary();
   if (active === 'fs') {
     if (!document.getElementById('fs-month').options.length) buildFSMonthOptions();
@@ -566,13 +831,16 @@ function refreshAccountDrivenUI(){
     setPreset(editing.preset || guessPreset(editing));
     document.getElementById('f-dr').value = editing.drCat || '';
     document.getElementById('f-cr').value = editing.crCat || '';
+    renderEventOptions(editing.eventId || '');
   } else {
     setPreset(uiPrefs.lastPreset || currentPreset);
   }
   renderSettings();
   updateMetrics();
   updateListCategoryFilterOptions();
+  updateListEventFilterOptions();
   renderQuickCreditButtons();
+  renderBudget();
 }
 
 function updateMetrics() {
@@ -590,16 +858,30 @@ function updateMetrics() {
 }
 
 function renderList() {
-  const y = viewMonth.getFullYear();
-  const m = viewMonth.getMonth();
-  document.getElementById('list-lbl').textContent = `${y}年${m + 1}月`;
-
   updateListCategoryFilterOptions();
+  updateListEventFilterOptions();
 
   const keyword = (document.getElementById('list-search')?.value || '').trim().toLowerCase();
   const categoryFilter = document.getElementById('list-category-filter')?.value || '';
+  const eventFilter = document.getElementById('list-event-filter')?.value || '';
+  const filteredEvent = eventFilter ? getBudgetEvent(eventFilter) : null;
+  const monthNav = document.querySelector('#t-list .mnav');
 
-  const es = mEntries(viewMonth)
+  if (filteredEvent) {
+    document.getElementById('list-lbl').textContent = `${filteredEvent.name} の取引`;
+    if (monthNav) monthNav.style.display = 'none';
+  } else {
+    const y = viewMonth.getFullYear();
+    const m = viewMonth.getMonth();
+    document.getElementById('list-lbl').textContent = `${y}年${m + 1}月`;
+    if (monthNav) monthNav.style.display = '';
+  }
+
+  const sourceEntries = filteredEvent
+    ? entries.filter(e => e.eventId === filteredEvent.id)
+    : mEntries(viewMonth);
+
+  const es = sourceEntries
     .filter(e => {
       const matchesKeyword = !keyword || [
         e.desc || '',
@@ -630,7 +912,7 @@ function renderList() {
       <div class="etop">
         <div>
           <div class="ememo">${escapeHtml(e.desc || e.drCat)}</div>
-          <div class="edate">${escapeHtml(e.date)}${isPointLinkedEntry(e) ? ' · ポイント払い' : ''}${isPointAdjustmentEntry(e) ? ' · 自動補助' : ''}</div>
+          <div class="edate">${escapeHtml(e.date)}${e.eventId ? ` · ${escapeHtml(getBudgetEvent(e.eventId)?.name || 'イベント')}` : ''}${isPointLinkedEntry(e) ? ' · ポイント払い' : ''}${isPointAdjustmentEntry(e) ? ' · 自動補助' : ''}</div>
         </div>
         <div class="eright-actions">
           <div class="eamt">${fmt(e.amount)}</div>
@@ -653,6 +935,28 @@ function renderList() {
       </div>
     </div>
   `).join('');
+}
+
+function openEventEntries(eventId) {
+  const event = getBudgetEvent(eventId);
+  if (!event) return;
+
+  const eventFilter = document.getElementById('list-event-filter');
+  const search = document.getElementById('list-search');
+  const categoryFilter = document.getElementById('list-category-filter');
+
+  if (event.startDate) {
+    const d = new Date(event.startDate);
+    if (!Number.isNaN(d.getTime())) {
+      viewMonth = new Date(d.getFullYear(), d.getMonth(), 1);
+    }
+  }
+
+  if (search) search.value = '';
+  if (categoryFilter) categoryFilter.value = '';
+  updateListEventFilterOptions();
+  if (eventFilter) eventFilter.value = eventId;
+  sw('list');
 }
 
 function delEntry(id) {
@@ -752,6 +1056,293 @@ function renderGraph() {
       options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, cutout:'60%' }
     });
   }
+
+  const fixedActual = curExp
+    .filter(e => getExpenseCostType(e.drCat) === 'fixed')
+    .reduce((sum, e) => sum + e.amount, 0);
+  const variableActual = curExp
+    .filter(e => getExpenseCostType(e.drCat) !== 'fixed')
+    .reduce((sum, e) => sum + e.amount, 0);
+
+  if (gCostType) gCostType.destroy();
+  gCostType = new Chart(document.getElementById('gc-costtype'), {
+    type:'bar',
+    data:{
+      labels:['固定費', '変動費'],
+      datasets:[{
+        data:[fixedActual, variableActual],
+        backgroundColor:['rgba(83,58,183,0.75)', 'rgba(55,138,221,0.75)'],
+        borderRadius:4
+      }]
+    },
+    options:{
+      responsive:true,
+      maintainAspectRatio:false,
+      plugins:{ legend:{ display:false } },
+      scales:{
+        x:{ grid:{ display:false }, ticks:{ color:'#888', font:{ size:10 } } },
+        y:{ grid:{ color:'rgba(128,128,128,0.12)' }, ticks:{ color:'#888', font:{ size:9 }, callback:v => '¥' + v.toLocaleString() } }
+      }
+    }
+  });
+}
+
+function renderBudget() {
+  const monthKey = monthKeyFromMonth(budgetMonth);
+  const budget = getMonthlyBudget(monthKey);
+  const totals = getMonthBudgetTotals(budgetMonth);
+  const actualByCategory = {};
+  mEntries(budgetMonth)
+    .filter(isExpense)
+    .forEach(entry => {
+      actualByCategory[entry.drCat] = (actualByCategory[entry.drCat] || 0) + entry.amount;
+    });
+
+  const monthLabel = document.getElementById('budget-month-label');
+  if (monthLabel) monthLabel.textContent = `${formatMonthLabel(budgetMonth)} の予算`;
+
+  const summary = document.getElementById('budget-month-summary');
+  if (summary) {
+    const totalOver = totals.budget > 0 && totals.actual > totals.budget;
+    const fixedOver = totals.fixedBudget > 0 && totals.fixedActual > totals.fixedBudget;
+    const variableOver = totals.variableBudget > 0 && totals.variableActual > totals.variableBudget;
+    summary.innerHTML = `
+      <div class="budget-stat"><span>予算合計</span><strong>${fmt(totals.budget)}</strong></div>
+      <div class="budget-stat ${totalOver ? 'alert' : ''}"><span>実績合計</span><strong class="${totalOver ? 'neg' : 'pos'}">${fmt(totals.actual)}</strong></div>
+      <div class="budget-stat ${fixedOver ? 'alert' : ''}"><span>固定費 予算 / 実績</span><strong>${fmt(totals.fixedBudget)} / ${fmt(totals.fixedActual)}</strong></div>
+      <div class="budget-stat ${variableOver ? 'alert' : ''}"><span>変動費 予算 / 実績</span><strong>${fmt(totals.variableBudget)} / ${fmt(totals.variableActual)}</strong></div>
+    `;
+  }
+
+  const list = document.getElementById('monthly-budget-list');
+  if (list) {
+    list.innerHTML = getAccounts('expense', true).map(name => {
+      const budgetValue = Number(budget[name] || 0);
+      const actualValue = Number(actualByCategory[name] || 0);
+      const diff = budgetValue - actualValue;
+      const costType = getExpenseCostType(name);
+      const diffClass = diff === 0 ? 'zero' : (diff > 0 ? 'under' : 'over');
+      const over = budgetValue > 0 && actualValue > budgetValue;
+      const progress = budgetValue > 0 ? Math.min(100, Math.round(actualValue / budgetValue * 100)) : 0;
+
+      return `
+        <div class="budget-row ${over ? 'over' : ''}">
+          <div class="budget-row-main">
+            <div class="budget-row-title">
+              <span class="color-dot" style="background:${getExpenseColor(name)};"></span>
+              <span>${escapeHtml(name)}</span>
+              <span class="pill ${costType}">${costType === 'fixed' ? '固定費' : '変動費'}</span>
+            </div>
+            <div class="budget-row-meta">実績 ${fmt(actualValue)}</div>
+            ${budgetValue > 0 ? `
+              <div class="budget-progress">
+                <div class="budget-progress-fill ${over ? 'warn' : ''}" style="width:${progress}%;"></div>
+              </div>
+            ` : ''}
+          </div>
+          <input
+            type="number"
+            inputmode="numeric"
+            min="0"
+            value="${budgetValue || ''}"
+            placeholder="予算"
+            onchange="setMonthlyBudgetValue('${escapeJs(monthKey)}', '${escapeJs(name)}', this.value)"
+          >
+          <div class="budget-diff ${diffClass}">
+            ${budgetValue > 0 ? `差額 ${fmtSigned(diff)}` : '予算未設定'}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const eventList = document.getElementById('budget-event-list');
+  if (eventList) {
+    if (!budgetEvents.length) {
+      eventList.innerHTML = '<div class="budget-empty">イベント予算はまだありません</div>';
+    } else {
+      eventList.innerHTML = budgetEvents
+        .slice()
+        .sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')) || a.name.localeCompare(b.name, 'ja'))
+        .map(event => {
+          const spent = getEventSpend(event.id);
+          const remaining = event.budget - spent;
+          const linkedCount = entries.filter(entry => entry.eventId === event.id).length;
+          const periodText = `${event.startDate || '開始日未設定'} - ${event.endDate || '終了日未設定'}`;
+          const categoryBreakdown = getEventBreakdown(event.id, 'drCat');
+          const paymentBreakdown = getEventBreakdown(event.id, 'crCat');
+          const renderBreakdownRows = rows => rows.length
+            ? rows.map(([name, value]) => `
+                <div class="budget-breakdown-row">
+                  <span>${escapeHtml(name)}</span>
+                  <strong>${fmt(value)}</strong>
+                </div>
+              `).join('')
+            : '<div class="budget-breakdown-empty">まだ支出がありません</div>';
+          return `
+            <div class="budget-event-card">
+              <div class="budget-event-head">
+                <div>
+                  <div class="budget-event-title">${escapeHtml(event.name)}</div>
+                  <div class="budget-event-sub ${remaining < 0 ? 'warn' : ''}">${escapeHtml(periodText)} / 紐づき ${linkedCount}件</div>
+                </div>
+                <span class="acct-tag ${remaining >= 0 ? 'on' : 'off'}">${remaining >= 0 ? '予算内' : '超過'}</span>
+              </div>
+              <div class="budget-event-metrics">
+                <div class="budget-event-metric"><span>予算</span><strong>${fmt(event.budget)}</strong></div>
+                <div class="budget-event-metric"><span>使用額</span><strong>${fmt(spent)}</strong></div>
+                <div class="budget-event-metric"><span>残額</span><strong class="${remaining >= 0 ? 'pos' : 'neg'}">${fmtSigned(remaining)}</strong></div>
+              </div>
+              <div class="budget-breakdowns">
+                <div class="budget-breakdown">
+                  <div class="budget-breakdown-title">費目別内訳</div>
+                  ${renderBreakdownRows(categoryBreakdown)}
+                </div>
+                <div class="budget-breakdown">
+                  <div class="budget-breakdown-title">支払方法別内訳</div>
+                  ${renderBreakdownRows(paymentBreakdown)}
+                </div>
+              </div>
+              <div class="sub-actions">
+                <button class="btnsub" type="button" onclick="openEventEntries('${escapeJs(event.id)}')">取引を見る</button>
+                <button class="btnsub" type="button" onclick="editBudgetEvent('${escapeJs(event.id)}')">編集</button>
+                <button class="btnsub" type="button" onclick="deleteBudgetEvent('${escapeJs(event.id)}')">削除</button>
+              </div>
+            </div>
+          `;
+        }).join('');
+    }
+  }
+
+  renderEventOptions(document.getElementById('f-event')?.value || '');
+}
+
+function changeBudgetMonth(offset) {
+  budgetMonth.setMonth(budgetMonth.getMonth() + offset);
+  renderBudget();
+}
+
+function setMonthlyBudgetValue(monthKey, category, rawValue) {
+  const value = Number(rawValue || 0);
+  monthlyBudgets[monthKey] = monthlyBudgets[monthKey] || {};
+  if (!Number.isFinite(value) || value <= 0) {
+    delete monthlyBudgets[monthKey][category];
+  } else {
+    monthlyBudgets[monthKey][category] = Math.round(value);
+  }
+
+  if (!Object.keys(monthlyBudgets[monthKey]).length) {
+    delete monthlyBudgets[monthKey];
+  }
+
+  saveMonthlyBudgets();
+  renderBudget();
+}
+
+function copyPreviousMonthBudget() {
+  const currentKey = monthKeyFromMonth(budgetMonth);
+  const prev = new Date(budgetMonth.getFullYear(), budgetMonth.getMonth() - 1, 1);
+  const prevKey = monthKeyFromMonth(prev);
+  const source = getMonthlyBudget(prevKey);
+
+  if (!Object.keys(source).length) {
+    alert('前月にコピーできる予算がありません');
+    return;
+  }
+
+  monthlyBudgets[currentKey] = { ...source };
+  saveMonthlyBudgets();
+  renderBudget();
+  alert('前月の予算をコピーしました');
+}
+
+function clearBudgetMonth() {
+  const monthKey = monthKeyFromMonth(budgetMonth);
+  if (!monthlyBudgets[monthKey]) {
+    alert('この月の予算はまだ設定されていません');
+    return;
+  }
+  if (!confirm(`${monthKey} の予算をクリアしますか？`)) return;
+  delete monthlyBudgets[monthKey];
+  saveMonthlyBudgets();
+  renderBudget();
+}
+
+function saveBudgetEvent() {
+  const isEditing = Boolean(editingBudgetEventId);
+  const name = (document.getElementById('budget-event-name')?.value || '').trim();
+  const amount = Number(document.getElementById('budget-event-amount')?.value || 0);
+  const startDate = document.getElementById('budget-event-start')?.value || '';
+  const endDate = document.getElementById('budget-event-end')?.value || '';
+
+  if (!name) {
+    alert('イベント名を入力してください');
+    return;
+  }
+  if (!Number.isFinite(amount) || amount < 0) {
+    alert('予算額を入力してください');
+    return;
+  }
+  if (startDate && endDate && startDate > endDate) {
+    alert('終了日は開始日以降にしてください');
+    return;
+  }
+
+  const payload = {
+    id: editingBudgetEventId || newEntryId(),
+    name,
+    budget: Math.round(amount),
+    startDate,
+    endDate
+  };
+
+  budgetEvents = budgetEvents.filter(event => event.id !== payload.id);
+  budgetEvents.push(payload);
+  saveBudgetEvents();
+  cancelBudgetEventEdit(false);
+  renderBudget();
+  alert(isEditing ? 'イベント予算を更新しました' : 'イベント予算を追加しました');
+}
+
+function editBudgetEvent(id) {
+  const event = getBudgetEvent(id);
+  if (!event) return;
+  editingBudgetEventId = id;
+  document.getElementById('budget-event-name').value = event.name || '';
+  document.getElementById('budget-event-amount').value = event.budget ?? '';
+  document.getElementById('budget-event-start').value = event.startDate || '';
+  document.getElementById('budget-event-end').value = event.endDate || '';
+  document.getElementById('budget-event-submit').textContent = 'イベント予算を更新';
+}
+
+function cancelBudgetEventEdit(showAlert = false) {
+  editingBudgetEventId = null;
+  const fields = ['budget-event-name', 'budget-event-amount', 'budget-event-start', 'budget-event-end'];
+  fields.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const submit = document.getElementById('budget-event-submit');
+  if (submit) submit.textContent = 'イベント予算を追加';
+  if (showAlert) alert('イベント予算の編集をキャンセルしました');
+}
+
+function deleteBudgetEvent(id) {
+  const event = getBudgetEvent(id);
+  if (!event) return;
+  const linkedCount = entries.filter(entry => entry.eventId === id).length;
+  const message = linkedCount
+    ? `「${event.name}」を削除すると、${linkedCount}件の取引からイベント紐づけも外れます。削除しますか？`
+    : `「${event.name}」を削除しますか？`;
+  if (!confirm(message)) return;
+
+  budgetEvents = budgetEvents.filter(item => item.id !== id);
+  entries = entries.map(entry => entry.eventId === id ? { ...entry, eventId:undefined } : entry);
+  saveBudgetEvents();
+  saveEntries();
+  if (editingBudgetEventId === id) cancelBudgetEventEdit(false);
+  renderBudget();
+  refreshActiveTab();
 }
 
 function renderSummary() {
@@ -1062,13 +1653,14 @@ function swFS(t) {
 }
 
 function sw(t) {
-  const tabs = ['record','list','graph','summary','fs','settings'];
+  const tabs = ['record','list','graph','budget','summary','fs','settings'];
   document.querySelectorAll('.tab-btn').forEach((el, i) => el.classList.toggle('active', tabs[i] === t));
   document.querySelectorAll('.sec').forEach(el => el.classList.remove('active'));
   document.getElementById('t-' + t).classList.add('active');
 
   if (t === 'list') renderList();
   if (t === 'graph') renderGraph();
+  if (t === 'budget') renderBudget();
   if (t === 'summary') renderSummary();
   if (t === 'fs') {
     buildFSMonthOptions();
@@ -1136,6 +1728,7 @@ function addEntry() {
   const date = document.getElementById('f-date').value;
   const amount = parseFloat(document.getElementById('f-amt').value);
   const desc = document.getElementById('f-desc').value.trim();
+  const eventId = document.getElementById('f-event').value || undefined;
   const drCat = document.getElementById('f-dr').value;
   const drNote = document.getElementById('f-dr-note').value.trim();
   const crCat = document.getElementById('f-cr').value;
@@ -1149,11 +1742,19 @@ function addEntry() {
     alert('勘定科目を選択してください');
     return;
   }
+  if (eventId) {
+    const event = getBudgetEvent(eventId);
+    if (event && date && !isEventDateMatch(event, date)) {
+      if (!confirm(`「${event.name}」の期間は ${event.startDate || '未設定'} - ${event.endDate || '未設定'} です。期間外の支出として登録しますか？`)) {
+        return;
+      }
+    }
+  }
 
   const targetMonth = monthKeyFromDate(date);
   if (blockIfClosedMonth(targetMonth, editingId ? '更新' : '追加')) return;
 
-  const data = { date, amount, desc, drCat, drNote, crCat, crNote, preset:currentPreset };
+  const data = { date, amount, desc, eventId, drCat, drNote, crCat, crNote, preset:currentPreset };
 
   uiPrefs.lastPreset = currentPreset;
   uiPrefs.lastCreditByPreset = uiPrefs.lastCreditByPreset || {};
@@ -1224,6 +1825,8 @@ function startEdit(id) {
   document.getElementById('f-date').value = entry.date || '';
   document.getElementById('f-amt').value = entry.amount ?? '';
   document.getElementById('f-desc').value = entry.desc || '';
+  renderEventOptions(entry.eventId || '');
+  document.getElementById('f-event').value = entry.eventId || '';
   document.getElementById('f-dr').value = entry.drCat || '';
   document.getElementById('f-dr-note').value = entry.drNote || '';
   document.getElementById('f-cr').value = entry.crCat || '';
@@ -1254,6 +1857,7 @@ function resetForm() {
   document.getElementById('f-date').value = formatLocalDate(new Date());
   document.getElementById('f-amt').value = '';
   document.getElementById('f-desc').value = '';
+  renderEventOptions('');
   document.getElementById('f-dr-note').value = '';
   document.getElementById('f-cr-note').value = '';
   setPreset(uiPrefs.lastPreset || 'expense');
@@ -1275,12 +1879,14 @@ function guessPreset(entry) {
 function buildBackupPayload() {
   return {
     app:'kakeibo',
-    version:5,
+    version:6,
     exportedAt:new Date().toISOString(),
     entries,
     accountSettings,
     uiPrefs,
-    monthlyClosings
+    monthlyClosings,
+    monthlyBudgets,
+    budgetEvents
   };
 }
 
@@ -1312,8 +1918,23 @@ function applyBackupPayload(raw) {
     : [];
   localStorage.setItem('kakeibo_monthly_closings', JSON.stringify(monthlyClosings));
 
+  monthlyBudgets = raw.monthlyBudgets && typeof raw.monthlyBudgets === 'object'
+    ? Object.fromEntries(
+        Object.entries(raw.monthlyBudgets)
+          .filter(([month]) => /^\d{4}-\d{2}$/.test(month))
+          .map(([month, value]) => [month, normalizeMonthlyBudget(value)])
+      )
+    : {};
+  localStorage.setItem('kakeibo_monthly_budgets', JSON.stringify(monthlyBudgets));
+
+  budgetEvents = Array.isArray(raw.budgetEvents)
+    ? raw.budgetEvents.map(normalizeBudgetEvent).filter(Boolean)
+    : [];
+  localStorage.setItem('kakeibo_budget_events', JSON.stringify(budgetEvents));
+
   saveEntries();
   cancelEdit(false);
+  cancelBudgetEventEdit(false);
   refreshActiveTab();
   refreshAccountDrivenUI();
 }
@@ -1594,6 +2215,7 @@ function normalizeEntry(e) {
     date: String(e.date),
     amount,
     desc: String(e.desc || ''),
+    eventId: e.eventId ? String(e.eventId) : undefined,
     drCat: String(e.drCat),
     drNote: String(e.drNote || ''),
     crCat: String(e.crCat),
@@ -1640,6 +2262,31 @@ function normalizeMonthlyClosing(closing) {
   };
 }
 
+function normalizeMonthlyBudget(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([category, amount]) => [String(category), Number(amount)])
+      .filter(([, amount]) => Number.isFinite(amount) && amount > 0)
+      .map(([category, amount]) => [category, Math.round(amount)])
+  );
+}
+
+function normalizeBudgetEvent(event) {
+  if (!event || typeof event !== 'object') return null;
+  const name = String(event.name || '').trim();
+  const budget = Number(event.budget ?? event.amount ?? 0);
+  if (!name || !Number.isFinite(budget) || budget < 0) return null;
+
+  return {
+    id:String(event.id || newEntryId()),
+    name,
+    budget:Math.round(budget),
+    startDate:String(event.startDate || ''),
+    endDate:String(event.endDate || '')
+  };
+}
+
 function renderSettings(){
   const endpointInput = document.getElementById('sync-endpoint');
   const tokenInput = document.getElementById('sync-token');
@@ -1673,6 +2320,10 @@ function renderSettings(){
             onchange="updateExpenseColor('${escapeJs(item.name)}', this.value)"
             aria-label="${escapeHtml(item.name)}の色"
           >
+          <select onchange="updateExpenseCostType('${escapeJs(item.name)}', this.value)">
+            <option value="fixed" ${item.costType === 'fixed' ? 'selected' : ''}>固定費</option>
+            <option value="variable" ${item.costType === 'fixed' ? '' : 'selected'}>変動費</option>
+          </select>
         `
         : '';
 
@@ -1720,7 +2371,7 @@ function addAccount(type){
   }
 
   if (type === 'expense') {
-    accountSettings[type].push({ name, active:true, color:randomColor() });
+    accountSettings[type].push({ name, active:true, color:randomColor(), costType:'variable' });
   } else {
     accountSettings[type].push({ name, active:true });
   }
@@ -1769,6 +2420,15 @@ function updateExpenseColor(name, color){
   if (active === 'graph') renderGraph();
 }
 
+function updateExpenseCostType(name, costType) {
+  const target = accountSettings.expense.find(a => a.name === name);
+  if (!target) return;
+  target.costType = costType === 'fixed' ? 'fixed' : 'variable';
+  saveAccountSettings();
+  renderSettings();
+  refreshActiveTab();
+}
+
 function escapeHtml(str) {
   return String(str).replace(/[&<>"']/g, s => ({
     '&':'&amp;',
@@ -1787,6 +2447,8 @@ setPreset(uiPrefs.lastPreset || 'expense');
 document.getElementById('f-date').value = formatLocalDate(new Date());
 updateMetrics();
 renderSettings();
+renderEventOptions('');
+renderBudget();
 updateListCategoryFilterOptions();
 renderQuickCreditButtons();
 setupFormInteractions();
