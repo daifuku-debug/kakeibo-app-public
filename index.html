@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#378ADD">
   <link rel="apple-touch-icon" href="icon-192.png">
 
-  <link rel="stylesheet" href="style.css?v=opening-balance-1">
+  <link rel="stylesheet" href="style.css?v=opening-liability-1">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
@@ -41,7 +41,8 @@
         <button class="preset-btn" onclick="setPreset('repay')" id="pr-repay">負債の返済</button>
         <button class="preset-btn" onclick="setPreset('transfer')" id="pr-transfer">口座振替</button>
         <button class="preset-btn" onclick="setPreset('point')" id="pr-point">ポイント払い</button>
-        <button class="preset-btn" onclick="setPreset('opening')" id="pr-opening">開始残高</button>
+        <button class="preset-btn" onclick="setPreset('opening-asset')" id="pr-opening-asset">開始時の資産</button>
+        <button class="preset-btn" onclick="setPreset('opening-liability')" id="pr-opening-liability">開始時の負債</button>
       </div>
 
       <div class="hint" id="f-hint"></div>
@@ -399,7 +400,7 @@
     </button>
   </nav>
 
-  <script src="app.js?v=opening-balance-1"></script>
+  <script src="app.js?v=opening-liability-1"></script>
 
   <script>
     if ('serviceWorker' in navigator) {
