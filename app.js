@@ -83,6 +83,7 @@ const POINT_ASSET_ACCOUNT = 'ポイント';
 const POINT_ADJUSTMENT_INCOME = 'プラス帳尻合わせ';
 const POINT_ROLE_ADJUSTMENT = 'point-adjustment';
 const POINT_ROLE_EXPENSE = 'point-expense';
+const OPENING_BALANCE_EQUITY = '開始残高調整';
 
 let accountSettings = loadAccountSettings();
 
@@ -258,6 +259,21 @@ function getPresetConfig(){
       crOpts:[{ g:'資産', opts:getAccounts('asset') }],
       drDef:getAccounts('expense')[0] || '',
       crDef:getAccounts('asset').includes('ポイント') ? 'ポイント' : (getAccounts('asset')[0] || '')
+    },
+    opening: {
+      drLabel:'借方（増やす側）',
+      crLabel:'貸方（相手側）',
+      hint:`使い始め時の初期残高を登録します。資産の開始残高は「資産 / ${OPENING_BALANCE_EQUITY}」、負債の開始残高は「${OPENING_BALANCE_EQUITY} / 負債」で入力します。月次収支には含めません。`,
+      drOpts:[
+        { g:'資産', opts:getAccounts('asset') },
+        { g:'純資産（開始残高）', opts:[OPENING_BALANCE_EQUITY] }
+      ],
+      crOpts:[
+        { g:'純資産（開始残高）', opts:[OPENING_BALANCE_EQUITY] },
+        { g:'負債', opts:getAccounts('liability') }
+      ],
+      drDef:getAccounts('asset')[0] || OPENING_BALANCE_EQUITY,
+      crDef:OPENING_BALANCE_EQUITY
     }
   };
 }
@@ -292,6 +308,20 @@ function setPreset(key) {
   document.getElementById('f-cr-label').textContent = p.crLabel;
   buildSelect('f-dr', p.drOpts, p.drDef);
   buildSelect('f-cr', p.crOpts, p.crDef);
+
+  const eventSelect = document.getElementById('f-event');
+  const eventHint = document.getElementById('f-event-hint');
+  const isOpeningPreset = key === 'opening';
+  if (eventSelect) {
+    eventSelect.disabled = isOpeningPreset;
+    if (isOpeningPreset) eventSelect.value = '';
+  }
+  if (eventHint && isOpeningPreset) {
+    eventHint.textContent = '開始残高ではイベント予算は使いません。';
+    eventHint.style.color = 'var(--text2)';
+  } else {
+    renderEventHint();
+  }
 
   renderQuickCreditButtons();
 }
@@ -473,6 +503,11 @@ function renderEventHint() {
   const sel = document.getElementById('f-event');
   const dateValue = document.getElementById('f-date')?.value || '';
   if (!hint || !sel) return;
+  if (currentPreset === 'opening') {
+    hint.innerHTML = '開始残高ではイベント予算は使いません。';
+    hint.style.color = 'var(--text2)';
+    return;
+  }
 
   const selected = getBudgetEvent(sel.value);
   const matched = budgetEvents.filter(event => isEventDateMatch(event, dateValue));
@@ -522,6 +557,8 @@ function getQuickCreditCandidates() {
     candidates = allAsset;
   } else if (preset === 'point') {
     candidates = allAsset;
+  } else if (preset === 'opening') {
+    candidates = [OPENING_BALANCE_EQUITY, ...allLiability];
   }
 
   const uniq = Array.from(new Set(candidates.filter(Boolean)));
@@ -684,12 +721,28 @@ function nowEntries() {
   return mEntries(new Date());
 }
 
+function isOpeningEntry(entry) {
+  return entry?.entryType === 'opening' || entry?.preset === 'opening';
+}
+
 function isIncome(e) {
-  return getAccounts('income', true).includes(e.crCat);
+  return !isOpeningEntry(e) && getAccounts('income', true).includes(e.crCat);
 }
 
 function isExpense(e) {
-  return getAccounts('expense', true).includes(e.drCat);
+  return !isOpeningEntry(e) && getAccounts('expense', true).includes(e.drCat);
+}
+
+function isOpeningAssetEntry(entry) {
+  return isOpeningEntry(entry) && getAccounts('asset', true).includes(entry.drCat) && entry.crCat === OPENING_BALANCE_EQUITY;
+}
+
+function isOpeningLiabilityEntry(entry) {
+  return isOpeningEntry(entry) && entry.drCat === OPENING_BALANCE_EQUITY && getAccounts('liability', true).includes(entry.crCat);
+}
+
+function isValidOpeningEntry(entry) {
+  return isOpeningAssetEntry(entry) || isOpeningLiabilityEntry(entry);
 }
 
 function acctFlow(name, month){
@@ -912,7 +965,7 @@ function renderList() {
       <div class="etop">
         <div>
           <div class="ememo">${escapeHtml(e.desc || e.drCat)}</div>
-          <div class="edate">${escapeHtml(e.date)}${e.eventId ? ` · ${escapeHtml(getBudgetEvent(e.eventId)?.name || 'イベント')}` : ''}${isPointLinkedEntry(e) ? ' · ポイント払い' : ''}${isPointAdjustmentEntry(e) ? ' · 自動補助' : ''}</div>
+          <div class="edate">${escapeHtml(e.date)}${e.eventId ? ` · ${escapeHtml(getBudgetEvent(e.eventId)?.name || 'イベント')}` : ''}${isPointLinkedEntry(e) ? ' · ポイント払い' : ''}${isPointAdjustmentEntry(e) ? ' · 自動補助' : ''}${isOpeningEntry(e) ? ' · 開始残高' : ''}</div>
         </div>
         <div class="eright-actions">
           <div class="eamt">${fmt(e.amount)}</div>
@@ -1711,6 +1764,7 @@ function makePointEntries(data, linkedId = newEntryId(), expenseId = newEntryId(
       crCat:POINT_ADJUSTMENT_INCOME,
       crNote:adjustmentNote,
       preset:'point',
+      entryType:'standard',
       linkedId,
       pointRole:POINT_ROLE_ADJUSTMENT
     },
@@ -1718,6 +1772,7 @@ function makePointEntries(data, linkedId = newEntryId(), expenseId = newEntryId(
       ...data,
       id:expenseId,
       preset:'point',
+      entryType:'standard',
       linkedId,
       pointRole:POINT_ROLE_EXPENSE
     }
@@ -1728,7 +1783,7 @@ function addEntry() {
   const date = document.getElementById('f-date').value;
   const amount = parseFloat(document.getElementById('f-amt').value);
   const desc = document.getElementById('f-desc').value.trim();
-  const eventId = document.getElementById('f-event').value || undefined;
+  const eventId = currentPreset === 'opening' ? undefined : (document.getElementById('f-event').value || undefined);
   const drCat = document.getElementById('f-dr').value;
   const drNote = document.getElementById('f-dr-note').value.trim();
   const crCat = document.getElementById('f-cr').value;
@@ -1754,7 +1809,13 @@ function addEntry() {
   const targetMonth = monthKeyFromDate(date);
   if (blockIfClosedMonth(targetMonth, editingId ? '更新' : '追加')) return;
 
-  const data = { date, amount, desc, eventId, drCat, drNote, crCat, crNote, preset:currentPreset };
+  const entryType = currentPreset === 'opening' ? 'opening' : 'standard';
+  const data = { date, amount, desc, eventId, drCat, drNote, crCat, crNote, preset:currentPreset, entryType };
+
+  if (currentPreset === 'opening' && !isValidOpeningEntry(data)) {
+    alert(`開始残高は「資産 / ${OPENING_BALANCE_EQUITY}」または「${OPENING_BALANCE_EQUITY} / 負債」の形で入力してください。`);
+    return;
+  }
 
   uiPrefs.lastPreset = currentPreset;
   uiPrefs.lastCreditByPreset = uiPrefs.lastCreditByPreset || {};
@@ -1786,7 +1847,7 @@ function addEntry() {
     } else {
       const linkedIds = new Set(originalLinked.map(e => e.id));
       entries = entries.filter(e => !linkedIds.has(e.id));
-      entries.push({ ...original, ...data, preset:currentPreset, linkedId:undefined, pointRole:undefined });
+      entries.push({ ...original, ...data, preset:currentPreset, entryType, linkedId:undefined, pointRole:undefined });
     }
     saveEntries();
     cancelEdit(false);
@@ -1869,6 +1930,7 @@ function guessPreset(entry) {
   const liabilities = getAccounts('liability', true);
   const incomes = getAccounts('income', true);
 
+  if (isOpeningEntry(entry) || entry.crCat === OPENING_BALANCE_EQUITY || entry.drCat === OPENING_BALANCE_EQUITY) return 'opening';
   if (entry.preset === 'point' || entry.linkedId && entry.pointRole) return 'point';
   if (incomes.includes(entry.crCat) && assets.includes(entry.drCat)) return 'income';
   if (liabilities.includes(entry.drCat) && assets.includes(entry.crCat)) return 'repay';
@@ -1879,7 +1941,7 @@ function guessPreset(entry) {
 function buildBackupPayload() {
   return {
     app:'kakeibo',
-    version:6,
+    version:7,
     exportedAt:new Date().toISOString(),
     entries,
     accountSettings,
@@ -2221,6 +2283,7 @@ function normalizeEntry(e) {
     crCat: String(e.crCat),
     crNote: String(e.crNote || ''),
     preset: String(e.preset || guessPreset(e)),
+    entryType: isOpeningEntry(e) ? 'opening' : 'standard',
     linkedId: e.linkedId ? String(e.linkedId) : undefined,
     pointRole: e.pointRole ? String(e.pointRole) : undefined
   };
