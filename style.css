@@ -98,11 +98,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
 .lgd span{display:flex;align-items:center;gap:4px;}
 .ldot{width:9px;height:9px;border-radius:2px;flex-shrink:0;}
 
-.cbar-row{display:flex;align-items:center;gap:8px;margin-bottom:8px;}
-.cbar-lbl{font-size:11px;width:60px;flex-shrink:0;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.cbar-trk{flex:1;height:8px;background:var(--bg2);border-radius:4px;overflow:hidden;}
-.cbar-fill{height:100%;border-radius:4px;}
-.cbar-val{font-size:11px;width:64px;text-align:right;color:var(--text);}
+.cbar-row{margin-bottom:12px;}
+.cbar-head{display:grid;grid-template-columns:20px 12px minmax(0,1fr) 38px 72px;align-items:center;gap:7px;margin-bottom:5px;}
+.cbar-rank{font-size:10px;color:var(--text3);text-align:center;}
+.cbar-lbl{font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cbar-share{font-size:11px;text-align:right;color:var(--text2);}
+.cbar-trk{height:9px;background:var(--bg2);border-radius:5px;overflow:hidden;}
+.cbar-fill{height:100%;border-radius:5px;background:var(--blue);}
+.cbar-val{font-size:11px;text-align:right;color:var(--text);font-variant-numeric:tabular-nums;}
 
 .ctrl{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
 .ctrl label{font-size:13px;color:var(--text2);}

@@ -85,9 +85,7 @@ const POINT_ROLE_ADJUSTMENT = 'point-adjustment';
 const POINT_ROLE_EXPENSE = 'point-expense';
 const OPENING_BALANCE_EQUITY = '開始残高調整';
 
-let accountSettings = loadAccountSettings();
-
-const payColors = {
+const defaultPaymentColors = {
   現金:'#888780',
   '交通・電子マネー':'#533AB7',
   SBI新生銀行:'#378ADD',
@@ -103,19 +101,32 @@ const payColors = {
 
 let currentPreset = 'expense';
 
+const chartColorPalette = ['#378ADD','#1D9E75','#533AB7','#185FA5','#BA7517','#EF9F27','#0F6E56','#D4537E','#D85A30','#639922','#7F77DD','#ED93B1','#888780','#E24B4A','#5F5E5A'];
+
 function randomColor() {
-  const palette = ['#378ADD','#1D9E75','#533AB7','#185FA5','#BA7517','#EF9F27','#0F6E56','#D4537E','#D85A30','#639922','#7F77DD','#ED93B1','#888780','#E24B4A','#5F5E5A'];
-  return palette[Math.floor(Math.random() * palette.length)];
+  return chartColorPalette[Math.floor(Math.random() * chartColorPalette.length)];
 }
+
+function defaultPaymentColor(name) {
+  if (defaultPaymentColors[name]) return defaultPaymentColors[name];
+  const hash = Array.from(String(name)).reduce((value, char) => ((value * 31) + char.codePointAt(0)) | 0, 0);
+  return chartColorPalette[Math.abs(hash) % chartColorPalette.length];
+}
+
+let accountSettings = loadAccountSettings();
 
 function normalizeAccountBlock(items, type){
   if (!Array.isArray(items)) return [];
   return items
     .map(item => {
       if (typeof item === 'string') {
-        return type === 'expense'
-          ? { name:item, active:true, color:defaultExpenseColors[item] || randomColor(), costType:defaultExpenseCostTypes[item] || 'variable' }
-          : { name:item, active:true };
+        if (type === 'expense') {
+          return { name:item, active:true, color:defaultExpenseColors[item] || randomColor(), costType:defaultExpenseCostTypes[item] || 'variable' };
+        }
+        if (type === 'asset' || type === 'liability') {
+          return { name:item, active:true, color:defaultPaymentColor(item) };
+        }
+        return { name:item, active:true };
       }
       if (item && typeof item.name === 'string') {
         const normalized = {
@@ -125,6 +136,8 @@ function normalizeAccountBlock(items, type){
         if (type === 'expense') {
           normalized.color = item.color || defaultExpenseColors[item.name] || randomColor();
           normalized.costType = item.costType === 'fixed' ? 'fixed' : (defaultExpenseCostTypes[item.name] || 'variable');
+        } else if (type === 'asset' || type === 'liability') {
+          normalized.color = item.color || defaultPaymentColor(item.name);
         }
         return normalized;
       }
@@ -138,8 +151,8 @@ function loadAccountSettings(){
   const raw = JSON.parse(localStorage.getItem('kakeibo_accounts') || 'null');
   if (!raw) {
     return {
-      asset: defaultAccounts.asset.map(name => ({ name, active:true })),
-      liability: defaultAccounts.liability.map(name => ({ name, active:true })),
+      asset: defaultAccounts.asset.map(name => ({ name, active:true, color:defaultPaymentColor(name) })),
+      liability: defaultAccounts.liability.map(name => ({ name, active:true, color:defaultPaymentColor(name) })),
       income: defaultAccounts.income.map(name => ({ name, active:true })),
       expense: defaultAccounts.expense.map(name => ({
         name,
@@ -167,6 +180,8 @@ function ensureAccount(items, type, name) {
     if (type === 'expense') {
       account.color = defaultExpenseColors[name] || randomColor();
       account.costType = defaultExpenseCostTypes[name] || 'variable';
+    } else if (type === 'asset' || type === 'liability') {
+      account.color = defaultPaymentColor(name);
     }
     normalized.push(account);
   }
@@ -186,6 +201,13 @@ function getAccounts(type, includeInactive = false){
 function getExpenseColor(name){
   const found = (accountSettings.expense || []).find(a => a.name === name);
   return found?.color || defaultExpenseColors[name] || '#888';
+}
+
+function getAccountColor(name) {
+  const found = ['asset', 'liability']
+    .flatMap(type => accountSettings[type] || [])
+    .find(account => account.name === name);
+  return found?.color || defaultPaymentColor(name);
 }
 
 function getExpenseCostType(name) {
@@ -1081,15 +1103,21 @@ function renderGraph() {
   curExp.forEach(e => { cm[e.drCat] = (cm[e.drCat] || 0) + e.amount; });
   const ce = Object.entries(cm).sort((a,b) => b[1] - a[1]);
   const ct = ce.reduce((s,[,v]) => s + v, 0);
+  const maxCategoryAmount = ce[0]?.[1] || 0;
 
   document.getElementById('gc-catbars').innerHTML = ce.length
-    ? ce.map(([c,v]) => `
+    ? ce.map(([c,v], index) => `
       <div class="cbar-row">
-        <div class="cbar-lbl" title="${escapeHtml(c)}">${escapeHtml(c)}</div>
-        <div class="cbar-trk">
-          <div class="cbar-fill" style="width:${ct ? Math.round(v/ct*100) : 0}%;background:${getExpenseColor(c)};"></div>
+        <div class="cbar-head">
+          <span class="cbar-rank">${index + 1}</span>
+          <span class="color-dot" style="background:${getExpenseColor(c)};"></span>
+          <span class="cbar-lbl" title="${escapeHtml(c)}">${escapeHtml(c)}</span>
+          <span class="cbar-share">${ct ? Math.round(v / ct * 100) : 0}%</span>
+          <span class="cbar-val">${fmt(v)}</span>
         </div>
-        <div class="cbar-val">${fmt(v)}</div>
+        <div class="cbar-trk">
+          <div class="cbar-fill" style="width:${maxCategoryAmount ? Math.round(v / maxCategoryAmount * 100) : 0}%;"></div>
+        </div>
       </div>
     `).join('')
     : '<div class="empty" style="padding:1rem;">データなし</div>';
@@ -1106,7 +1134,7 @@ function renderGraph() {
   const pt = pe.reduce((s,[,v]) => s + v, 0);
 
   document.getElementById('gc-paylgd').innerHTML = pe.map(([p,v]) => `
-    <span><span class="ldot" style="background:${payColors[p] || '#888'};"></span>${escapeHtml(p)} ${pt ? Math.round(v/pt*100) : 0}%</span>
+    <span><span class="ldot" style="background:${getAccountColor(p)};"></span>${escapeHtml(p)} ${fmt(v)}（${pt ? Math.round(v/pt*100) : 0}%）</span>
   `).join('');
 
   if (gPay) { gPay.destroy(); gPay = null; }
@@ -1117,11 +1145,28 @@ function renderGraph() {
         labels:pe.map(([p]) => p),
         datasets:[{
           data:pe.map(([,v]) => v),
-          backgroundColor:pe.map(([p]) => payColors[p] || '#888'),
-          borderWidth:0
+          backgroundColor:pe.map(([p]) => getAccountColor(p)),
+          borderColor:'rgba(255,255,255,0.75)',
+          borderWidth:2
         }]
       },
-      options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } }, cutout:'60%' }
+      options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        plugins:{
+          legend:{ display:false },
+          tooltip:{
+            callbacks:{
+              label:context => {
+                const value = Number(context.raw || 0);
+                const share = pt ? Math.round(value / pt * 100) : 0;
+                return `${context.label}: ${fmt(value)}（${share}%）`;
+              }
+            }
+          }
+        },
+        cutout:'60%'
+      }
     });
   }
 
@@ -2399,20 +2444,22 @@ function renderSettings(){
 
     mount.innerHTML = list.map(item => {
       const used = isAccountUsed(type, item.name);
-      const colorControl = type === 'expense'
+      const colorControl = type === 'expense' || type === 'asset' || type === 'liability'
         ? `
           <span class="color-dot" style="background:${item.color || '#888'};"></span>
           <input
             class="color-picker"
             type="color"
             value="${item.color || '#888888'}"
-            onchange="updateExpenseColor('${escapeJs(item.name)}', this.value)"
+            onchange="updateAccountColor('${type}', '${escapeJs(item.name)}', this.value)"
             aria-label="${escapeHtml(item.name)}の色"
           >
+          ${type === 'expense' ? `
           <select onchange="updateExpenseCostType('${escapeJs(item.name)}', this.value)">
             <option value="fixed" ${item.costType === 'fixed' ? 'selected' : ''}>固定費</option>
             <option value="variable" ${item.costType === 'fixed' ? '' : 'selected'}>変動費</option>
           </select>
+          ` : ''}
         `
         : '';
 
@@ -2461,6 +2508,8 @@ function addAccount(type){
 
   if (type === 'expense') {
     accountSettings[type].push({ name, active:true, color:randomColor(), costType:'variable' });
+  } else if (type === 'asset' || type === 'liability') {
+    accountSettings[type].push({ name, active:true, color:randomColor() });
   } else {
     accountSettings[type].push({ name, active:true });
   }
@@ -2498,8 +2547,9 @@ function enableAccount(type, name){
   refreshAccountDrivenUI();
 }
 
-function updateExpenseColor(name, color){
-  const target = accountSettings.expense.find(a => a.name === name);
+function updateAccountColor(type, name, color){
+  if (!['asset', 'liability', 'expense'].includes(type)) return;
+  const target = accountSettings[type].find(a => a.name === name);
   if (!target) return;
   target.color = color;
   saveAccountSettings();
