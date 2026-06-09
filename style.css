@@ -224,6 +224,25 @@ button:disabled{opacity:.55;cursor:wait;}
 .budget-stat.alert{background:var(--red-bg);}
 .budget-stat span{display:block;font-size:11px;color:var(--text2);margin-bottom:4px;}
 .budget-stat strong{font-size:14px;}
+.food-pace-card{border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:12px;background:var(--bg2);}
+.food-pace-card[data-status="comfortable"]{background:var(--green-bg);border-color:rgba(29,158,117,.28);}
+.food-pace-card[data-status="on-pace"]{background:var(--blue-bg);border-color:rgba(55,138,221,.28);}
+.food-pace-card[data-status="over"]{background:var(--red-bg);border-color:rgba(216,90,48,.28);}
+.food-pace-card[data-status="comfortable"] :is(.food-pace-title,.food-pace-main span,.food-pace-main strong,.food-pace-main small,.food-pace-message){color:var(--green-dark);}
+.food-pace-card[data-status="on-pace"] :is(.food-pace-title,.food-pace-main span,.food-pace-main strong,.food-pace-main small,.food-pace-message){color:var(--blue-dark);}
+.food-pace-card[data-status="over"] :is(.food-pace-title,.food-pace-main span,.food-pace-main strong,.food-pace-main small,.food-pace-message){color:var(--red-dark);}
+.food-pace-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;}
+.food-pace-title{font-size:13px;font-weight:600;}
+.food-pace-status{font-size:11px;font-weight:600;padding:3px 8px;border-radius:999px;background:var(--bg);color:var(--text2);}
+.food-pace-main{text-align:center;padding:4px 0 14px;}
+.food-pace-main span{display:block;font-size:12px;color:var(--text2);margin-bottom:4px;}
+.food-pace-main strong{display:block;font-size:30px;line-height:1.2;}
+.food-pace-main small{display:block;font-size:12px;color:var(--text2);margin-top:4px;}
+.food-pace-metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+.food-pace-metric{background:var(--bg);border-radius:var(--radius-sm);padding:9px;}
+.food-pace-metric span{display:block;font-size:10px;color:var(--text2);margin-bottom:3px;}
+.food-pace-metric strong{font-size:13px;}
+.food-pace-message{font-size:11px;color:var(--text2);line-height:1.5;margin-top:10px;}
 .budget-list{display:grid;gap:8px;}
 .budget-row{display:grid;grid-template-columns:minmax(0,1fr) 110px 110px;gap:8px;align-items:center;padding:10px 0;border-bottom:0.5px solid var(--border);}
 .budget-row.over{background:rgba(216,90,48,0.06);}

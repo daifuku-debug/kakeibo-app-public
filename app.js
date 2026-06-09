@@ -882,6 +882,116 @@ function getMonthBudgetTotals(monthDate) {
   return totals;
 }
 
+function getFoodPaceData(now = new Date()) {
+  const categories = ['食費', '外食費'];
+  const monthKey = monthKeyFromMonth(now);
+  const budget = getMonthlyBudget(monthKey);
+  const configuredCategories = categories.filter(name => Number(budget[name] || 0) > 0);
+  const totalBudget = categories.reduce((sum, name) => sum + Number(budget[name] || 0), 0);
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const spent = mEntries(now)
+    .filter(entry => isExpense(entry) && configuredCategories.includes(entry.drCat))
+    .filter(entry => {
+      const entryDate = new Date(entry.date);
+      return !Number.isNaN(entryDate.getTime()) && entryDate <= endOfToday;
+    })
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const elapsedDays = now.getDate();
+  const remainingDays = daysInMonth - elapsedDays + 1;
+  const remaining = totalBudget - spent;
+  const dailyAvailable = Math.max(0, Math.floor((remaining / remainingDays) / 100) * 100);
+  const projected = Math.round(spent / elapsedDays * daysInMonth);
+  const paceTarget = totalBudget / daysInMonth * elapsedDays;
+  const paceDifference = paceTarget - spent;
+
+  let status = 'on-pace';
+  let statusLabel = '適正ペース';
+  let message = '現在のペースなら、予算内に収まる見込みです。';
+  if (remaining < 0) {
+    status = 'over';
+    statusLabel = '予算超過';
+    message = `すでに予算を ${fmt(Math.abs(remaining))} 超過しています。`;
+  } else if (projected > totalBudget) {
+    status = 'over';
+    statusLabel = 'ペース超過';
+    message = `現在のペースでは、月末に ${fmt(projected - totalBudget)} 超過する見込みです。`;
+  } else if (projected <= totalBudget * 0.9) {
+    status = 'comfortable';
+    statusLabel = '余裕あり';
+    message = '現在のペースなら、予算に余裕を残して月末を迎える見込みです。';
+  }
+
+  return {
+    configuredCategories,
+    totalBudget,
+    spent,
+    remaining,
+    remainingDays,
+    dailyAvailable,
+    projected,
+    paceDifference,
+    status,
+    statusLabel,
+    message
+  };
+}
+
+function renderFoodPaceCard() {
+  const card = document.getElementById('food-pace-card');
+  if (!card) return;
+
+  const now = new Date();
+  if (monthKeyFromMonth(budgetMonth) !== monthKeyFromMonth(now)) {
+    card.hidden = true;
+    card.innerHTML = '';
+    return;
+  }
+
+  card.hidden = false;
+  const pace = getFoodPaceData(now);
+  if (!pace.configuredCategories.length) {
+    card.dataset.status = 'on-pace';
+    card.innerHTML = `
+      <div class="food-pace-head">
+        <div class="food-pace-title">食費ペースメーカー</div>
+        <span class="food-pace-status">予算未設定</span>
+      </div>
+      <div class="food-pace-message">食費または外食費の予算を設定すると、月末までの1日あたり使用可能額を表示します。</div>
+    `;
+    return;
+  }
+
+  const partialNote = pace.configuredCategories.length === 1
+    ? ` ${pace.configuredCategories[0]}の予算だけで計算しています。`
+    : '';
+  const paceNote = pace.paceDifference >= 0
+    ? `今日時点の目安より ${fmt(pace.paceDifference)} 余裕があります。`
+    : `今日時点の目安を ${fmt(Math.abs(pace.paceDifference))} 上回っています。`;
+  const mainValue = pace.remaining >= 0 ? fmt(pace.dailyAvailable) : fmt(Math.abs(pace.remaining));
+  const mainLabel = pace.remaining >= 0 ? '月末まで、1日あたり' : '現在の予算超過額';
+  const mainSuffix = pace.remaining >= 0 ? '使えます' : '超過しています';
+
+  card.dataset.status = pace.status;
+  card.innerHTML = `
+    <div class="food-pace-head">
+      <div class="food-pace-title">食費ペースメーカー</div>
+      <span class="food-pace-status">${pace.statusLabel}</span>
+    </div>
+    <div class="food-pace-main">
+      <span>${mainLabel}</span>
+      <strong>${mainValue}</strong>
+      <small>${mainSuffix}</small>
+    </div>
+    <div class="food-pace-metrics">
+      <div class="food-pace-metric"><span>残額 / 残り日数</span><strong>${fmtSigned(pace.remaining)} / ${pace.remainingDays}日</strong></div>
+      <div class="food-pace-metric"><span>予算 / 使用済み</span><strong>${fmt(pace.totalBudget)} / ${fmt(pace.spent)}</strong></div>
+      <div class="food-pace-metric"><span>単純日割りの月末予測</span><strong>${fmt(pace.projected)}</strong></div>
+    </div>
+    <div class="food-pace-message">${pace.message} ${paceNote}${partialNote}</div>
+  `;
+}
+
 function getClosing(monthKey) {
   return monthlyClosings.find(c => c.month === monthKey) || null;
 }
@@ -1213,6 +1323,8 @@ function renderBudget() {
 
   const monthLabel = document.getElementById('budget-month-label');
   if (monthLabel) monthLabel.textContent = `${formatMonthLabel(budgetMonth)} の予算`;
+
+  renderFoodPaceCard();
 
   const summary = document.getElementById('budget-month-summary');
   if (summary) {

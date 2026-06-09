@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#378ADD">
   <link rel="apple-touch-icon" href="icon-192.png">
 
-  <link rel="stylesheet" href="style.css?v=graph-readability-1">
+  <link rel="stylesheet" href="style.css?v=food-pace-2">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
@@ -195,6 +195,7 @@
       <div class="hint">
         月予算はいつでも作成・変更できます。必要な月だけ設定して、あとから見直しても大丈夫です。
       </div>
+      <div id="food-pace-card" class="food-pace-card" hidden></div>
       <div class="budget-summary" id="budget-month-summary"></div>
       <div class="sub-actions">
         <button class="btnsub" type="button" onclick="copyPreviousMonthBudget()">前月の予算をコピー</button>
@@ -400,7 +401,7 @@
     </button>
   </nav>
 
-  <script src="app.js?v=graph-readability-1"></script>
+  <script src="app.js?v=food-pace-2"></script>
 
   <script>
     if ('serviceWorker' in navigator) {
