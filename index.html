@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#378ADD">
   <link rel="apple-touch-icon" href="icon-192.png">
 
-  <link rel="stylesheet" href="style.css?v=food-pace-2">
+  <link rel="stylesheet" href="style.css?v=household-pace-1">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
@@ -33,6 +33,8 @@
         <div class="metric-value" id="m-bal">¥0</div>
       </div>
     </div>
+
+    <div id="household-pace-card" class="household-pace-card"></div>
 
     <div class="card">
       <div class="preset-row">
@@ -194,6 +196,26 @@
       </div>
       <div class="hint">
         月予算はいつでも作成・変更できます。必要な月だけ設定して、あとから見直しても大丈夫です。
+      </div>
+      <div class="household-plan">
+        <div class="household-plan-head">
+          <div>
+            <div class="household-plan-title">家計計画</div>
+            <div class="household-plan-sub">手取り予定額と貯金目標から、今月自由に使える金額を計算します。</div>
+          </div>
+          <button class="btnsub household-plan-copy" type="button" onclick="copyPreviousMonthPlan()">前月をコピー</button>
+        </div>
+        <div class="household-plan-grid">
+          <div class="fgrp">
+            <label>手取り予定額（円）</label>
+            <input type="number" id="plan-take-home" inputmode="numeric" min="0" placeholder="0" onchange="setMonthlyPlanValue('takeHome', this.value)">
+          </div>
+          <div class="fgrp">
+            <label>貯金目標（円）</label>
+            <input type="number" id="plan-savings-goal" inputmode="numeric" min="0" placeholder="0" onchange="setMonthlyPlanValue('savingsGoal', this.value)">
+          </div>
+        </div>
+        <div id="household-plan-summary" class="household-plan-summary"></div>
       </div>
       <div id="food-pace-card" class="food-pace-card" hidden></div>
       <div class="budget-summary" id="budget-month-summary"></div>
@@ -401,7 +423,7 @@
     </button>
   </nav>
 
-  <script src="app.js?v=food-pace-2"></script>
+  <script src="app.js?v=household-pace-1"></script>
 
   <script>
     if ('serviceWorker' in navigator) {

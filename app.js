@@ -13,6 +13,7 @@ let uiPrefs = JSON.parse(localStorage.getItem('kakeibo_ui_prefs') || '{}');
 let syncSettings = loadSyncSettings();
 let monthlyClosings = loadMonthlyClosings();
 let monthlyBudgets = loadMonthlyBudgets();
+let monthlyPlans = loadMonthlyPlans();
 let budgetEvents = loadBudgetEvents();
 let sessionSyncPassphrase = '';
 let budgetMonth = new Date();
@@ -387,6 +388,21 @@ function loadMonthlyBudgets() {
 
 function saveMonthlyBudgets() {
   localStorage.setItem('kakeibo_monthly_budgets', JSON.stringify(monthlyBudgets));
+  markLocalChanged();
+}
+
+function loadMonthlyPlans() {
+  const raw = JSON.parse(localStorage.getItem('kakeibo_monthly_plans') || '{}');
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw)
+      .filter(([month]) => /^\d{4}-\d{2}$/.test(month))
+      .map(([month, value]) => [month, normalizeMonthlyPlan(value)])
+  );
+}
+
+function saveMonthlyPlans() {
+  localStorage.setItem('kakeibo_monthly_plans', JSON.stringify(monthlyPlans));
   markLocalChanged();
 }
 
@@ -770,6 +786,12 @@ function isExpense(e) {
   return !isOpeningEntry(e) && getAccounts('expense', true).includes(e.drCat);
 }
 
+function isLiabilityRepayment(e) {
+  return !isOpeningEntry(e) &&
+    getAccounts('liability', true).includes(e.drCat) &&
+    getAccounts('asset', true).includes(e.crCat);
+}
+
 function isOpeningAssetEntry(entry) {
   return isOpeningEntry(entry) && getAccounts('asset', true).includes(entry.drCat) && entry.crCat === OPENING_BALANCE_EQUITY;
 }
@@ -880,6 +902,96 @@ function getMonthBudgetTotals(monthDate) {
   });
 
   return totals;
+}
+
+function getHouseholdPaceData(now = new Date()) {
+  const monthKey = monthKeyFromMonth(now);
+  const plan = monthlyPlans[monthKey] || { takeHome:0, savingsGoal:0 };
+  const budget = getMonthlyBudget(monthKey);
+  const fixedBudget = getAccounts('expense', true)
+    .filter(name => getExpenseCostType(name) === 'fixed')
+    .reduce((sum, name) => sum + Number(budget[name] || 0), 0);
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const elapsedEntries = mEntries(now).filter(entry => {
+    const entryDate = new Date(entry.date);
+    return !Number.isNaN(entryDate.getTime()) && entryDate <= endOfToday;
+  });
+  const variableSpent = elapsedEntries
+    .filter(entry => isExpense(entry) && getExpenseCostType(entry.drCat) !== 'fixed')
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const repayments = elapsedEntries
+    .filter(isLiabilityRepayment)
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const availableTotal = plan.takeHome - fixedBudget - plan.savingsGoal;
+  const actualRemaining = availableTotal - variableSpent - repayments;
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const remainingDays = daysInMonth - now.getDate() + 1;
+  const idealRemaining = Math.round(availableTotal * remainingDays / daysInMonth);
+  const paceDifference = actualRemaining - idealRemaining;
+
+  return {
+    configured:plan.takeHome > 0,
+    takeHome:plan.takeHome,
+    savingsGoal:plan.savingsGoal,
+    fixedBudget,
+    variableSpent,
+    repayments,
+    availableTotal,
+    actualRemaining,
+    idealRemaining,
+    paceDifference
+  };
+}
+
+function renderHouseholdPaceCard() {
+  const card = document.getElementById('household-pace-card');
+  if (!card) return;
+
+  const pace = getHouseholdPaceData();
+  if (!pace.configured) {
+    card.dataset.status = 'unconfigured';
+    card.innerHTML = `
+      <div class="household-pace-head">
+        <div class="household-pace-title">今月あと使えるお金</div>
+        <span class="household-pace-status">計画未設定</span>
+      </div>
+      <div class="household-pace-message">予算タブで手取り予定額と貯金目標を設定すると、今月の実際残額と理想残額を表示します。</div>
+    `;
+    return;
+  }
+
+  let status = 'comfortable';
+  let statusLabel = '余裕あり';
+  let paceMessage = `${fmt(pace.paceDifference)} 余裕あり`;
+  if (pace.actualRemaining < 0) {
+    status = 'over';
+    statusLabel = '予算超過';
+    paceMessage = `▲${fmt(Math.abs(pace.actualRemaining))} 予算超過`;
+  } else if (pace.paceDifference < 0) {
+    status = 'over';
+    statusLabel = '使いすぎ';
+    paceMessage = `▲${fmt(Math.abs(pace.paceDifference))} 使いすぎ`;
+  }
+
+  card.dataset.status = status;
+  const actualRemainingText = pace.actualRemaining >= 0 ? fmt(pace.actualRemaining) : `-${fmt(pace.actualRemaining)}`;
+  const availableTotalText = pace.availableTotal >= 0 ? fmt(pace.availableTotal) : `-${fmt(pace.availableTotal)}`;
+  const idealRemainingText = pace.idealRemaining >= 0 ? fmt(pace.idealRemaining) : `-${fmt(pace.idealRemaining)}`;
+  card.innerHTML = `
+    <div class="household-pace-head">
+      <div class="household-pace-title">今月あと使えるお金</div>
+      <span class="household-pace-status">${statusLabel}</span>
+    </div>
+    <div class="household-pace-main">
+      <span>実際残額</span>
+      <strong>残り ${actualRemainingText}</strong>
+    </div>
+    <div class="household-pace-metrics">
+      <div class="household-pace-metric"><span>今月使える総額</span><strong>${availableTotalText}</strong></div>
+      <div class="household-pace-metric"><span>今日時点の理想残額</span><strong>${idealRemainingText}</strong></div>
+    </div>
+    <div class="household-pace-message ${status === 'over' ? 'over' : 'comfortable'}">${paceMessage}</div>
+  `;
 }
 
 function getFoodPaceData(now = new Date()) {
@@ -1055,6 +1167,7 @@ function updateMetrics() {
   const b = document.getElementById('m-bal');
   b.textContent = fmtSigned(bal);
   b.style.color = bal >= 0 ? 'var(--green)' : 'var(--red)';
+  renderHouseholdPaceCard();
 }
 
 function renderList() {
@@ -1324,6 +1437,7 @@ function renderBudget() {
   const monthLabel = document.getElementById('budget-month-label');
   if (monthLabel) monthLabel.textContent = `${formatMonthLabel(budgetMonth)} の予算`;
 
+  renderHouseholdPlan();
   renderFoodPaceCard();
 
   const summary = document.getElementById('budget-month-summary');
@@ -1447,6 +1561,50 @@ function changeBudgetMonth(offset) {
   renderBudget();
 }
 
+function renderHouseholdPlan() {
+  const monthKey = monthKeyFromMonth(budgetMonth);
+  const plan = monthlyPlans[monthKey] || { takeHome:0, savingsGoal:0 };
+  const totals = getMonthBudgetTotals(budgetMonth);
+  const takeHomeInput = document.getElementById('plan-take-home');
+  const savingsInput = document.getElementById('plan-savings-goal');
+  if (takeHomeInput) takeHomeInput.value = plan.takeHome || '';
+  if (savingsInput) savingsInput.value = plan.savingsGoal || '';
+
+  const summary = document.getElementById('household-plan-summary');
+  if (!summary) return;
+  const available = plan.takeHome - totals.fixedBudget - plan.savingsGoal;
+  summary.innerHTML = `
+    <div><span>固定費予算</span><strong>${fmt(totals.fixedBudget)}</strong></div>
+    <div><span>今月使える総額</span><strong class="${available >= 0 ? 'pos' : 'neg'}">${fmtSigned(available)}</strong></div>
+  `;
+}
+
+function setMonthlyPlanValue(field, rawValue) {
+  if (!['takeHome', 'savingsGoal'].includes(field)) return;
+  const monthKey = monthKeyFromMonth(budgetMonth);
+  const value = Math.max(0, Math.round(Number(rawValue || 0)));
+  monthlyPlans[monthKey] = monthlyPlans[monthKey] || { takeHome:0, savingsGoal:0 };
+  monthlyPlans[monthKey][field] = Number.isFinite(value) ? value : 0;
+  saveMonthlyPlans();
+  renderBudget();
+  updateMetrics();
+}
+
+function copyPreviousMonthPlan() {
+  const currentKey = monthKeyFromMonth(budgetMonth);
+  const prev = new Date(budgetMonth.getFullYear(), budgetMonth.getMonth() - 1, 1);
+  const source = monthlyPlans[monthKeyFromMonth(prev)];
+  if (!source || source.takeHome <= 0) {
+    alert('前月にコピーできる家計計画がありません');
+    return;
+  }
+  monthlyPlans[currentKey] = { ...source };
+  saveMonthlyPlans();
+  renderBudget();
+  updateMetrics();
+  alert('前月の家計計画をコピーしました');
+}
+
 function setMonthlyBudgetValue(monthKey, category, rawValue) {
   const value = Number(rawValue || 0);
   monthlyBudgets[monthKey] = monthlyBudgets[monthKey] || {};
@@ -1462,6 +1620,7 @@ function setMonthlyBudgetValue(monthKey, category, rawValue) {
 
   saveMonthlyBudgets();
   renderBudget();
+  updateMetrics();
 }
 
 function copyPreviousMonthBudget() {
@@ -1478,6 +1637,7 @@ function copyPreviousMonthBudget() {
   monthlyBudgets[currentKey] = { ...source };
   saveMonthlyBudgets();
   renderBudget();
+  updateMetrics();
   alert('前月の予算をコピーしました');
 }
 
@@ -1491,6 +1651,7 @@ function clearBudgetMonth() {
   delete monthlyBudgets[monthKey];
   saveMonthlyBudgets();
   renderBudget();
+  updateMetrics();
 }
 
 function saveBudgetEvent() {
@@ -2124,13 +2285,14 @@ function guessPreset(entry) {
 function buildBackupPayload() {
   return {
     app:'kakeibo',
-    version:7,
+    version:8,
     exportedAt:new Date().toISOString(),
     entries,
     accountSettings,
     uiPrefs,
     monthlyClosings,
     monthlyBudgets,
+    monthlyPlans,
     budgetEvents
   };
 }
@@ -2171,6 +2333,15 @@ function applyBackupPayload(raw) {
       )
     : {};
   localStorage.setItem('kakeibo_monthly_budgets', JSON.stringify(monthlyBudgets));
+
+  monthlyPlans = raw.monthlyPlans && typeof raw.monthlyPlans === 'object'
+    ? Object.fromEntries(
+        Object.entries(raw.monthlyPlans)
+          .filter(([month]) => /^\d{4}-\d{2}$/.test(month))
+          .map(([month, value]) => [month, normalizeMonthlyPlan(value)])
+      )
+    : {};
+  localStorage.setItem('kakeibo_monthly_plans', JSON.stringify(monthlyPlans));
 
   budgetEvents = Array.isArray(raw.budgetEvents)
     ? raw.budgetEvents.map(normalizeBudgetEvent).filter(Boolean)
@@ -2516,6 +2687,16 @@ function normalizeMonthlyBudget(value) {
       .filter(([, amount]) => Number.isFinite(amount) && amount > 0)
       .map(([category, amount]) => [category, Math.round(amount)])
   );
+}
+
+function normalizeMonthlyPlan(value) {
+  const plan = value && typeof value === 'object' ? value : {};
+  const takeHome = Math.max(0, Math.round(Number(plan.takeHome || 0)));
+  const savingsGoal = Math.max(0, Math.round(Number(plan.savingsGoal || 0)));
+  return {
+    takeHome:Number.isFinite(takeHome) ? takeHome : 0,
+    savingsGoal:Number.isFinite(savingsGoal) ? savingsGoal : 0
+  };
 }
 
 function normalizeBudgetEvent(event) {
