@@ -930,6 +930,9 @@ function getHouseholdPaceData(now = new Date()) {
   const remainingDays = daysInMonth - now.getDate() + 1;
   const idealRemaining = Math.round(availableTotal * remainingDays / daysInMonth);
   const paceDifference = actualRemaining - idealRemaining;
+  const todayAvailable = actualRemaining > 0 && remainingDays > 0
+    ? Math.floor(actualRemaining / remainingDays / 100) * 100
+    : 0;
 
   return {
     configured:plan.takeHome > 0,
@@ -940,8 +943,10 @@ function getHouseholdPaceData(now = new Date()) {
     repayments,
     availableTotal,
     actualRemaining,
+    remainingDays,
     idealRemaining,
-    paceDifference
+    paceDifference,
+    todayAvailable
   };
 }
 
@@ -987,6 +992,10 @@ function renderHouseholdPaceCard() {
     <div class="household-pace-main">
       <span>実際残額</span>
       <strong>残り ${actualRemainingText}</strong>
+    </div>
+    <div class="household-pace-today">
+      <span>今日使える目安</span>
+      <strong>${fmt(pace.todayAvailable)}</strong>
     </div>
     <div class="household-pace-metrics">
       <div class="household-pace-metric"><span>今月使える総額</span><strong>${availableTotalText}</strong></div>
