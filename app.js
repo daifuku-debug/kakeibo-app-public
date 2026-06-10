@@ -15,6 +15,7 @@ let monthlyClosings = loadMonthlyClosings();
 let monthlyBudgets = loadMonthlyBudgets();
 let monthlyPlans = loadMonthlyPlans();
 let budgetEvents = loadBudgetEvents();
+let financialLevelSettings = loadFinancialLevelSettings();
 let sessionSyncPassphrase = '';
 let budgetMonth = new Date();
 budgetMonth.setDate(1);
@@ -408,6 +409,17 @@ function saveMonthlyPlans() {
   markLocalChanged();
 }
 
+function loadFinancialLevelSettings() {
+  const raw = JSON.parse(localStorage.getItem('kakeibo_financial_level_settings') || '{}');
+  const startingNetWorth = Number(raw?.startingNetWorth);
+  return { startingNetWorth:Number.isFinite(startingNetWorth) ? Math.round(startingNetWorth) : null };
+}
+
+function saveFinancialLevelSettings() {
+  localStorage.setItem('kakeibo_financial_level_settings', JSON.stringify(financialLevelSettings));
+  markLocalChanged();
+}
+
 function loadBudgetEvents() {
   const raw = JSON.parse(localStorage.getItem('kakeibo_budget_events') || '[]');
   if (!Array.isArray(raw)) return [];
@@ -742,6 +754,10 @@ function fmtS(n) {
   return n < 0 ? `<span class="neg">-¥${s}</span>` : `¥${s}`;
 }
 
+function fmtPlainSigned(n) {
+  return `${n < 0 ? '-' : ''}${fmt(n)}`;
+}
+
 function fmtSC(n) {
   if (n === 0) return '<span class="zero">—</span>';
   const s = Math.round(Math.abs(n)).toLocaleString();
@@ -825,6 +841,127 @@ function acctCumul(name, upToMonth){
     if (e.crCat === name) t -= e.amount;
   });
   return t;
+}
+
+function getCurrentNetWorth(baseMonth = new Date()) {
+  const assets = getAccounts('asset', true).reduce((sum, name) => sum + acctCumul(name, baseMonth), 0);
+  const liabilities = getAccounts('liability', true).reduce((sum, name) => sum - acctCumul(name, baseMonth), 0);
+  return assets - liabilities;
+}
+
+const FINANCIAL_DEBT_LEVELS = [
+  { level:1, threshold:0, title:'借金返済スタート' },
+  { level:2, threshold:5, title:'返済見習い' },
+  { level:3, threshold:10, title:'再建の一歩' },
+  { level:4, threshold:20, title:'再建者' },
+  { level:5, threshold:30, title:'家計改善中' },
+  { level:6, threshold:40, title:'負債半減目前' },
+  { level:7, threshold:50, title:'折り返し地点' },
+  { level:8, threshold:60, title:'解放見習い' },
+  { level:9, threshold:80, title:'債務解放目前' },
+  { level:10, threshold:100, title:'債務解放者' }
+];
+
+const FINANCIAL_ASSET_LEVELS = [
+  { level:11, threshold:0, title:'資産形成スタート' },
+  { level:12, threshold:100000, title:'黒字の芽' },
+  { level:13, threshold:300000, title:'生活防衛の入口' },
+  { level:14, threshold:500000, title:'家計の土台' },
+  { level:15, threshold:1000000, title:'貯蓄家' },
+  { level:16, threshold:2000000, title:'資産形成者' },
+  { level:17, threshold:3000000, title:'堅実資産家' },
+  { level:18, threshold:5000000, title:'自由度上昇中' },
+  { level:19, threshold:10000000, title:'ひとつの到達点' }
+];
+
+function getFinancialLevelData(baseMonth = new Date()) {
+  const startingNetWorth = Number(financialLevelSettings.startingNetWorth);
+  const currentNetWorth = getCurrentNetWorth(baseMonth);
+  if (!Number.isFinite(startingNetWorth) || startingNetWorth === 0) {
+    return { configured:false, currentNetWorth };
+  }
+
+  if (currentNetWorth >= 0) {
+    const currentLevel = [...FINANCIAL_ASSET_LEVELS].reverse().find(item => currentNetWorth >= item.threshold);
+    const currentIndex = FINANCIAL_ASSET_LEVELS.indexOf(currentLevel);
+    const nextLevel = FINANCIAL_ASSET_LEVELS[currentIndex + 1] || null;
+    const progressRate = nextLevel
+      ? Math.max(0, Math.min(100, Math.round((currentNetWorth - currentLevel.threshold) / (nextLevel.threshold - currentLevel.threshold) * 100)))
+      : 100;
+    return {
+      configured:true,
+      stage:2,
+      stageName:'資産形成編',
+      level:currentLevel.level,
+      title:currentLevel.title,
+      currentNetWorth,
+      startingNetWorth,
+      progressRate,
+      nextThresholdRate:null,
+      amountToNext:nextLevel ? Math.max(0, nextLevel.threshold - currentNetWorth) : 0,
+      message:nextLevel ? `次のLv.${nextLevel.level}まであと ${fmt(nextLevel.threshold - currentNetWorth)}` : '資産形成編の最高レベルに到達しました'
+    };
+  }
+
+  const rawProgress = startingNetWorth < 0
+    ? (currentNetWorth - startingNetWorth) / Math.abs(startingNetWorth) * 100
+    : 0;
+  const progressRate = Math.max(0, Math.min(100, Math.round(rawProgress)));
+  const currentLevel = [...FINANCIAL_DEBT_LEVELS].reverse().find(item => progressRate >= item.threshold);
+  const currentIndex = FINANCIAL_DEBT_LEVELS.indexOf(currentLevel);
+  const nextLevel = FINANCIAL_DEBT_LEVELS[currentIndex + 1] || null;
+  const targetNetWorth = nextLevel
+    ? startingNetWorth + Math.abs(startingNetWorth) * nextLevel.threshold / 100
+    : currentNetWorth;
+
+  return {
+    configured:true,
+    stage:1,
+    stageName:'借金返済編',
+    level:currentLevel.level,
+    title:currentLevel.title,
+    currentNetWorth,
+    startingNetWorth,
+    progressRate,
+    nextThresholdRate:nextLevel?.threshold ?? 100,
+    amountToNext:nextLevel ? Math.max(0, Math.round(targetNetWorth - currentNetWorth)) : 0,
+    message:`借金返済編を${progressRate}%クリアしました`
+  };
+}
+
+function renderFinancialLevelCard() {
+  const card = document.getElementById('financial-level-card');
+  if (!card) return;
+  const data = getFinancialLevelData();
+  if (!data.configured) {
+    card.dataset.stage = 'unconfigured';
+    card.innerHTML = `
+      <div class="financial-level-head">
+        <div class="financial-level-title">財務レベル</div>
+        <span class="financial-level-badge">未設定</span>
+      </div>
+      <div class="financial-level-message">開始純資産を設定すると、借金返済・資産形成の進捗をレベル表示できます。設定タブで開始純資産を入力してください。</div>
+    `;
+    return;
+  }
+
+  card.dataset.stage = String(data.stage);
+  card.innerHTML = `
+    <div class="financial-level-head">
+      <div>
+        <div class="financial-level-title">財務Lv.${data.level}</div>
+        <div class="financial-level-main">${escapeHtml(data.title)}</div>
+      </div>
+      <span class="financial-level-badge">${data.stageName}${data.stage === 1 ? ` ${data.progressRate}%` : ''}</span>
+    </div>
+    <div class="financial-level-stage">${data.message}</div>
+    <div class="financial-level-progress"><div class="financial-level-progress-fill" style="width:${data.progressRate}%"></div></div>
+    <div class="financial-level-metrics">
+      <div class="financial-level-metric"><span>現在純資産</span><strong>${fmtPlainSigned(data.currentNetWorth)}</strong></div>
+      ${data.stage === 1 ? `<div class="financial-level-metric"><span>開始純資産</span><strong>${fmtPlainSigned(data.startingNetWorth)}</strong></div>` : ''}
+      <div class="financial-level-metric"><span>次のLvまで</span><strong>${data.amountToNext > 0 ? `あと ${fmt(data.amountToNext)}` : '最高Lv到達'}</strong></div>
+    </div>
+  `;
 }
 
 function monthKeyFromDate(dateValue) {
@@ -1353,6 +1490,7 @@ function updateMetrics() {
   const b = document.getElementById('m-bal');
   b.textContent = fmtSigned(bal);
   b.style.color = bal >= 0 ? 'var(--green)' : 'var(--red)';
+  renderFinancialLevelCard();
   renderHouseholdPaceCard();
 }
 
@@ -1997,7 +2135,7 @@ function renderBS() {
 
   const assetG = bsRows(getAccounts('asset', true), v => v);
   const liabG = bsRows(getAccounts('liability', true), v => -v);
-  const equity = assetG.total - liabG.total;
+  const equity = getCurrentNetWorth(baseMonth);
 
   function colHtml(title, badge, sections, footLabel, footVal) {
     let h = `<div class="bs-col"><div class="bs-hdr"><span class="badge ${badge}">${title}</span></div>`;
@@ -2020,11 +2158,7 @@ function renderBS() {
     ], '負債＋純資産合計', liabG.total + equity);
 
   const months = getMonths(12);
-  const eqData = months.map(m => {
-    const a = getAccounts('asset', true).reduce((s,n) => s + acctCumul(n,m), 0);
-    const l = getAccounts('liability', true).reduce((s,n) => s - acctCumul(n,m), 0);
-    return a - l;
-  });
+  const eqData = months.map(getCurrentNetWorth);
 
   if (gBS) gBS.destroy();
   gBS = new Chart(document.getElementById('bs-chart'), {
@@ -2472,7 +2606,7 @@ function guessPreset(entry) {
 function buildBackupPayload() {
   return {
     app:'kakeibo',
-    version:8,
+    version:9,
     exportedAt:new Date().toISOString(),
     entries,
     accountSettings,
@@ -2480,7 +2614,8 @@ function buildBackupPayload() {
     monthlyClosings,
     monthlyBudgets,
     monthlyPlans,
-    budgetEvents
+    budgetEvents,
+    financialLevelSettings
   };
 }
 
@@ -2534,6 +2669,14 @@ function applyBackupPayload(raw) {
     ? raw.budgetEvents.map(normalizeBudgetEvent).filter(Boolean)
     : [];
   localStorage.setItem('kakeibo_budget_events', JSON.stringify(budgetEvents));
+
+  if (raw.financialLevelSettings && typeof raw.financialLevelSettings === 'object') {
+    const startingNetWorth = Number(raw.financialLevelSettings.startingNetWorth);
+    financialLevelSettings = {
+      startingNetWorth:Number.isFinite(startingNetWorth) ? Math.round(startingNetWorth) : null
+    };
+    localStorage.setItem('kakeibo_financial_level_settings', JSON.stringify(financialLevelSettings));
+  }
 
   saveEntries();
   cancelEdit(false);
@@ -2904,11 +3047,16 @@ function normalizeBudgetEvent(event) {
 function renderSettings(){
   const endpointInput = document.getElementById('sync-endpoint');
   const tokenInput = document.getElementById('sync-token');
+  const startingNetWorthInput = document.getElementById('financial-starting-net-worth');
   if (endpointInput && endpointInput.value !== syncSettings.endpoint) {
     endpointInput.value = syncSettings.endpoint;
   }
   if (tokenInput && tokenInput.value !== syncSettings.token) {
     tokenInput.value = syncSettings.token;
+  }
+  if (startingNetWorthInput) {
+    const value = financialLevelSettings.startingNetWorth;
+    startingNetWorthInput.value = Number.isFinite(value) ? value : '';
   }
   renderSyncStatus();
 
@@ -2961,6 +3109,21 @@ function renderSettings(){
       `;
     }).join('');
   });
+}
+
+function saveFinancialLevelConfig() {
+  const input = document.getElementById('financial-starting-net-worth');
+  const rawValue = input?.value?.trim() || '';
+  const startingNetWorth = Number(rawValue);
+  if (!rawValue || !Number.isFinite(startingNetWorth)) {
+    alert('開始純資産を入力してください');
+    return;
+  }
+  financialLevelSettings.startingNetWorth = Math.round(startingNetWorth);
+  saveFinancialLevelSettings();
+  renderFinancialLevelCard();
+  renderSettings();
+  alert('財務レベル設定を保存しました');
 }
 
 function addAccount(type){
