@@ -18,6 +18,8 @@ let budgetEvents = loadBudgetEvents();
 let sessionSyncPassphrase = '';
 let budgetMonth = new Date();
 budgetMonth.setDate(1);
+let comparisonMonth = new Date();
+comparisonMonth.setDate(1);
 
 const defaultAccounts = {
   asset: ['現金','交通・電子マネー','SBI新生銀行','住信SBIネット銀行','ゆうちょ銀行','三井住友銀行','楽天銀行','中国銀行','NISA','固定資産','その他資産','ポイント'],
@@ -1049,6 +1051,180 @@ function getFoodPaceData(now = new Date()) {
   };
 }
 
+function getExpenseTotalsByCategory(monthDate, throughDay = null) {
+  const totals = {};
+  mEntries(monthDate)
+    .filter(isExpense)
+    .filter(entry => {
+      if (!throughDay) return true;
+      const entryDate = new Date(entry.date);
+      return !Number.isNaN(entryDate.getTime()) && entryDate.getDate() <= throughDay;
+    })
+    .forEach(entry => {
+      totals[entry.drCat] = (totals[entry.drCat] || 0) + entry.amount;
+    });
+  return totals;
+}
+
+function getMonthComparisonData(baseMonth = comparisonMonth, now = new Date()) {
+  const current = new Date(baseMonth.getFullYear(), baseMonth.getMonth(), 1);
+  const previous = new Date(baseMonth.getFullYear(), baseMonth.getMonth() - 1, 1);
+  const isCurrentMonth = monthKeyFromMonth(current) === monthKeyFromMonth(now);
+  const throughDay = isCurrentMonth ? now.getDate() : null;
+  const previousThroughDay = throughDay
+    ? Math.min(throughDay, new Date(previous.getFullYear(), previous.getMonth() + 1, 0).getDate())
+    : null;
+  const currentByCategory = getExpenseTotalsByCategory(current, throughDay);
+  const previousByCategory = getExpenseTotalsByCategory(previous, previousThroughDay);
+  const categories = Array.from(new Set([
+    ...getAccounts('expense', true),
+    ...Object.keys(currentByCategory),
+    ...Object.keys(previousByCategory)
+  ]));
+  const rows = categories
+    .map(name => {
+      const currentAmount = Number(currentByCategory[name] || 0);
+      const previousAmount = Number(previousByCategory[name] || 0);
+      return { name, currentAmount, previousAmount, savings:previousAmount - currentAmount };
+    })
+    .filter(row => row.currentAmount !== 0 || row.previousAmount !== 0)
+    .sort((a, b) => Math.abs(b.savings) - Math.abs(a.savings));
+  const currentTotal = rows.reduce((sum, row) => sum + row.currentAmount, 0);
+  const previousTotal = rows.reduce((sum, row) => sum + row.previousAmount, 0);
+  const foodRows = ['食費', '外食費'].map(name => rows.find(row => row.name === name) || {
+    name,
+    currentAmount:0,
+    previousAmount:0,
+    savings:0
+  });
+
+  return {
+    current,
+    previous,
+    throughDay,
+    previousThroughDay,
+    rows,
+    currentTotal,
+    previousTotal,
+    savings:previousTotal - currentTotal,
+    foodRows,
+    foodSavings:foodRows.reduce((sum, row) => sum + row.savings, 0)
+  };
+}
+
+function comparisonStatus(amount) {
+  if (amount > 0) return { status:'saved', label:'節約', className:'pos' };
+  if (amount < 0) return { status:'increased', label:'増加', className:'neg' };
+  return { status:'same', label:'変化なし', className:'zero' };
+}
+
+function renderComparison() {
+  const data = getMonthComparisonData();
+  const summary = document.getElementById('comparison-summary');
+  const food = document.getElementById('comparison-food');
+  const list = document.getElementById('comparison-category-list');
+  const label = document.getElementById('comparison-month-label');
+  const note = document.getElementById('comparison-period-note');
+  if (!summary || !food || !list || !label || !note) return;
+
+  label.textContent = `${formatMonthLabel(data.current)} と前月`;
+  const nextButton = document.getElementById('comparison-next');
+  if (nextButton) {
+    nextButton.disabled = monthKeyFromMonth(data.current) === monthKeyFromMonth(new Date());
+  }
+  note.textContent = data.throughDay
+    ? `${data.current.getMonth() + 1}月は${data.throughDay}日まで、${data.previous.getMonth() + 1}月は${data.previousThroughDay}日までの支出で比較しています。`
+    : `${formatMonthLabel(data.current)}の1か月分を${formatMonthLabel(data.previous)}と比較しています。`;
+
+  const totalStatus = comparisonStatus(data.savings);
+  const changeRate = data.previousTotal > 0 ? Math.round(Math.abs(data.savings) / data.previousTotal * 100) : null;
+  summary.innerHTML = `
+    <div class="comparison-hero" data-status="${totalStatus.status}">
+      <div class="comparison-hero-head">
+        <div class="comparison-hero-title">支出全体</div>
+        <span class="comparison-badge">${totalStatus.label}</span>
+      </div>
+      <div class="comparison-hero-main">
+        <span>前月との差</span>
+        <strong class="${totalStatus.className}">${fmtSigned(data.savings)}</strong>
+        <small>${data.savings > 0 ? '前月より支出を抑えました' : data.savings < 0 ? '前月より支出が増えました' : '前月と同額です'}${changeRate === null ? '' : `（${changeRate}%）`}</small>
+      </div>
+      <div class="comparison-pair">
+        <div><span>今月</span><strong>${fmt(data.currentTotal)}</strong></div>
+        <div><span>前月</span><strong>${fmt(data.previousTotal)}</strong></div>
+      </div>
+    </div>
+  `;
+
+  const foodCurrent = data.foodRows.reduce((sum, row) => sum + row.currentAmount, 0);
+  const foodPrevious = data.foodRows.reduce((sum, row) => sum + row.previousAmount, 0);
+  const foodStatus = comparisonStatus(data.foodSavings);
+  food.innerHTML = `
+    <div class="card comparison-food-card">
+      <div class="comparison-section-head">
+        <div>
+          <div class="comparison-section-title">食費・外食費</div>
+          <div class="comparison-section-sub">日々調整しやすい支出をまとめて確認</div>
+        </div>
+        <strong class="comparison-result ${foodStatus.className}">${foodStatus.label} ${fmt(Math.abs(data.foodSavings))}</strong>
+      </div>
+      <div class="comparison-pair">
+        <div><span>今月 合計</span><strong>${fmt(foodCurrent)}</strong></div>
+        <div><span>前月 合計</span><strong>${fmt(foodPrevious)}</strong></div>
+      </div>
+      <div class="comparison-mini-list">
+        ${data.foodRows.map(row => {
+          const status = comparisonStatus(row.savings);
+          return `
+            <div class="comparison-mini-row">
+              <span>${escapeHtml(row.name)}</span>
+              <span>${fmt(row.currentAmount)} / ${fmt(row.previousAmount)}</span>
+              <strong class="${status.className}">${fmtSigned(row.savings)}</strong>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+
+  list.innerHTML = data.rows.length
+    ? data.rows.map(row => {
+        const status = comparisonStatus(row.savings);
+        const maxAmount = Math.max(row.currentAmount, row.previousAmount, 1);
+        return `
+          <div class="comparison-row">
+            <div class="comparison-row-head">
+              <span class="color-dot" style="background:${getExpenseColor(row.name)};"></span>
+              <strong>${escapeHtml(row.name)}</strong>
+              <span class="${status.className}">${status.label} ${fmt(Math.abs(row.savings))}</span>
+            </div>
+            <div class="comparison-bars">
+              <div class="comparison-bar-row">
+                <span>今月</span>
+                <div class="comparison-bar-track"><div class="comparison-bar-fill current" style="width:${Math.round(row.currentAmount / maxAmount * 100)}%"></div></div>
+                <strong>${fmt(row.currentAmount)}</strong>
+              </div>
+              <div class="comparison-bar-row">
+                <span>前月</span>
+                <div class="comparison-bar-track"><div class="comparison-bar-fill previous" style="width:${Math.round(row.previousAmount / maxAmount * 100)}%"></div></div>
+                <strong>${fmt(row.previousAmount)}</strong>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '<div class="budget-empty">比較できる支出データがありません</div>';
+}
+
+function changeComparisonMonth(offset) {
+  const candidate = new Date(comparisonMonth.getFullYear(), comparisonMonth.getMonth() + offset, 1);
+  const current = new Date();
+  current.setDate(1);
+  if (candidate > current) return;
+  comparisonMonth = candidate;
+  renderComparison();
+}
+
 function renderFoodPaceCard() {
   const card = document.getElementById('food-pace-card');
   if (!card) return;
@@ -1119,7 +1295,7 @@ function blockIfClosedMonth(monthKey, actionLabel) {
 }
 
 function getActiveTab() {
-  const tabs = ['record','list','graph','budget','summary','fs','settings'];
+  const tabs = ['record','list','graph','comparison','budget','summary','fs','settings'];
   return tabs.find(t => document.getElementById('tb-' + t)?.classList.contains('active')) || 'record';
 }
 
@@ -1128,6 +1304,7 @@ function refreshActiveTab() {
   const active = getActiveTab();
   if (active === 'list') renderList();
   if (active === 'graph') renderGraph();
+  if (active === 'comparison') renderComparison();
   if (active === 'budget') renderBudget();
   if (active === 'summary') renderSummary();
   if (active === 'fs') {
@@ -2039,13 +2216,14 @@ function swFS(t) {
 }
 
 function sw(t) {
-  const tabs = ['record','list','graph','budget','summary','fs','settings'];
+  const tabs = ['record','list','graph','comparison','budget','summary','fs','settings'];
   document.querySelectorAll('.tab-btn').forEach((el, i) => el.classList.toggle('active', tabs[i] === t));
   document.querySelectorAll('.sec').forEach(el => el.classList.remove('active'));
   document.getElementById('t-' + t).classList.add('active');
 
   if (t === 'list') renderList();
   if (t === 'graph') renderGraph();
+  if (t === 'comparison') renderComparison();
   if (t === 'budget') renderBudget();
   if (t === 'summary') renderSummary();
   if (t === 'fs') {

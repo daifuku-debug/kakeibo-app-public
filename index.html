@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#378ADD">
   <link rel="apple-touch-icon" href="icon-192.png">
 
-  <link rel="stylesheet" href="style.css?v=household-pace-1">
+  <link rel="stylesheet" href="style.css?v=month-comparison-1">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
@@ -182,6 +182,28 @@
         <span><span class="ldot" style="background:#378ADD;"></span>変動費</span>
       </div>
       <div style="position:relative;width:100%;height:180px;"><canvas id="gc-costtype"></canvas></div>
+    </div>
+  </div>
+
+  <div id="t-comparison" class="sec">
+    <div class="lhdr">
+      <span class="lhdr-title" id="comparison-month-label"></span>
+      <div class="mnav">
+        <button type="button" onclick="changeComparisonMonth(-1)">◀</button>
+        <button type="button" id="comparison-next" onclick="changeComparisonMonth(1)">▶</button>
+      </div>
+    </div>
+    <div id="comparison-period-note" class="hint"></div>
+    <div id="comparison-summary"></div>
+    <div id="comparison-food"></div>
+    <div class="card">
+      <div class="comparison-section-head">
+        <div>
+          <div class="comparison-section-title">費目ごとの前月比較</div>
+          <div class="comparison-section-sub">差額が大きい順に表示します。</div>
+        </div>
+      </div>
+      <div id="comparison-category-list" class="comparison-category-list"></div>
     </div>
   </div>
 
@@ -406,6 +428,9 @@
     <button class="tab-btn" onclick="sw('graph')" id="tb-graph">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>グラフ
     </button>
+    <button class="tab-btn" onclick="sw('comparison')" id="tb-comparison">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M7 7h13M17 4l3 3-3 3M17 17H4M7 14l-3 3 3 3"/></svg>比較
+    </button>
     <button class="tab-btn" onclick="sw('budget')" id="tb-budget">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h16M4 12h10M4 17h7"/><path d="M18 11v8M14 15h8"/></svg>予算
     </button>
@@ -423,7 +448,7 @@
     </button>
   </nav>
 
-  <script src="app.js?v=household-pace-1"></script>
+  <script src="app.js?v=month-comparison-1"></script>
 
   <script>
     if ('serviceWorker' in navigator) {
