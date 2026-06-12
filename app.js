@@ -25,8 +25,8 @@ comparisonMonth.setDate(1);
 const defaultAccounts = {
   asset: ['現金','交通・電子マネー','SBI新生銀行','住信SBIネット銀行','ゆうちょ銀行','三井住友銀行','楽天銀行','中国銀行','NISA','固定資産','その他資産','ポイント'],
   liability: ['クレジットカード','奨学金','Paidy','消費者金融','その他負債'],
-  income: ['給与','賞与','配当金','雑収入','銀行利息','プラス帳尻合わせ'],
-  expense: ['食費','日用品費','家賃','水道代','ガス代','電気代','交通費','通信費','娯楽費','外食費','自己投資','沙奈費','交際費','旅費','被服費','美容費','保険','医療費','特別費','生活費','雑費','仕送り','税金等','マイナス帳尻合わせ']
+  income: ['給与','賞与','配当金','雑収入','銀行利息','評価益','プラス帳尻合わせ'],
+  expense: ['食費','日用品費','家賃','水道代','ガス代','電気代','交通費','通信費','娯楽費','外食費','自己投資','沙奈費','交際費','旅費','被服費','美容費','保険','医療費','特別費','生活費','雑費','仕送り','税金等','評価損','マイナス帳尻合わせ']
 };
 
 const defaultExpenseColors = {
@@ -53,6 +53,7 @@ const defaultExpenseColors = {
   雑費:'#B4B2A9',
   仕送り:'#533AB7',
   税金等:'#444441',
+  評価損:'#D4537E',
   'マイナス帳尻合わせ':'#5F5E5A'
 };
 
@@ -80,11 +81,14 @@ const defaultExpenseCostTypes = {
   雑費:'variable',
   仕送り:'fixed',
   税金等:'fixed',
+  評価損:'variable',
   'マイナス帳尻合わせ':'variable'
 };
 
 const POINT_ASSET_ACCOUNT = 'ポイント';
 const POINT_ADJUSTMENT_INCOME = 'プラス帳尻合わせ';
+const INVESTMENT_GAIN_INCOME = '評価益';
+const INVESTMENT_LOSS_EXPENSE = '評価損';
 const POINT_ROLE_ADJUSTMENT = 'point-adjustment';
 const POINT_ROLE_EXPENSE = 'point-expense';
 const OPENING_BALANCE_EQUITY = '開始残高調整';
@@ -169,9 +173,13 @@ function loadAccountSettings(){
   return {
     asset: ensureAccount(normalizeAccountBlock(raw.asset || defaultAccounts.asset, 'asset'), 'asset', POINT_ASSET_ACCOUNT),
     liability: normalizeAccountBlock(raw.liability || defaultAccounts.liability, 'liability'),
-    income: ensureAccount(normalizeAccountBlock(raw.income || defaultAccounts.income, 'income'), 'income', POINT_ADJUSTMENT_INCOME),
-    expense: normalizeAccountBlock(raw.expense || defaultAccounts.expense, 'expense')
+    income: ensureAccounts(normalizeAccountBlock(raw.income || defaultAccounts.income, 'income'), 'income', [POINT_ADJUSTMENT_INCOME, INVESTMENT_GAIN_INCOME]),
+    expense: ensureAccounts(normalizeAccountBlock(raw.expense || defaultAccounts.expense, 'expense'), 'expense', [INVESTMENT_LOSS_EXPENSE])
   };
+}
+
+function ensureAccounts(items, type, names) {
+  return names.reduce((accounts, name) => ensureAccount(accounts, type, name), items);
 }
 
 function ensureAccount(items, type, name) {
@@ -2168,43 +2176,93 @@ function renderBS() {
   });
 }
 
+function isBusinessIncome(name) {
+  return ['給与', '賞与'].includes(name);
+}
+
+function isInvestmentIncome(name) {
+  return ['配当金', '銀行利息', INVESTMENT_GAIN_INCOME].includes(name);
+}
+
+function isInvestmentLossExpense(name) {
+  return name === INVESTMENT_LOSS_EXPENSE;
+}
+
+function getPlSectionData(baseMonth) {
+  const es = mEntries(baseMonth);
+  const incomeRows = getAccounts('income', true)
+    .map(name => ({
+      name,
+      val:es.filter(e => e.crCat === name).reduce((sum, entry) => sum + entry.amount, 0)
+    }))
+    .filter(row => row.val > 0);
+  const expenseRows = getAccounts('expense', true)
+    .map(name => ({
+      name,
+      val:es.filter(e => e.drCat === name).reduce((sum, entry) => sum + entry.amount, 0)
+    }))
+    .filter(row => row.val > 0);
+
+  const businessRows = incomeRows.filter(row => isBusinessIncome(row.name));
+  const investmentIncomeRows = incomeRows.filter(row => isInvestmentIncome(row.name));
+  const investmentLossRows = expenseRows
+    .filter(row => isInvestmentLossExpense(row.name))
+    .map(row => ({ ...row, val:-row.val }));
+  const investmentRows = [...investmentIncomeRows, ...investmentLossRows];
+  const otherIncomeRows = incomeRows.filter(row => !isBusinessIncome(row.name) && !isInvestmentIncome(row.name));
+  const livingExpenseRows = expenseRows.filter(row => !isInvestmentLossExpense(row.name));
+  const total = rows => rows.reduce((sum, row) => sum + row.val, 0);
+
+  const businessTotal = total(businessRows);
+  const investmentTotal = total(investmentRows);
+  const otherIncomeTotal = total(otherIncomeRows);
+  const livingExpenseTotal = total(livingExpenseRows);
+
+  return {
+    businessRows,
+    businessTotal,
+    investmentRows,
+    investmentTotal,
+    otherIncomeRows,
+    otherIncomeTotal,
+    livingExpenseRows,
+    livingExpenseTotal,
+    finalProfit:businessTotal + investmentTotal + otherIncomeTotal - livingExpenseTotal
+  };
+}
+
+function renderPlRows(title, rows, total, badgeClass, totalLabel, signed = true) {
+  let html = `<div class="pl-row hdr"><span class="badge ${badgeClass}">${title}</span></div>`;
+  if (rows.length) {
+    rows.forEach(row => {
+      const amount = signed ? fmtSigned(row.val) : fmt(row.val);
+      html += `<div class="pl-row acct"><span>${escapeHtml(row.name)}</span><span class="${row.val >= 0 ? 'pos' : 'neg'}">${amount}</span></div>`;
+    });
+  } else {
+    html += '<div class="pl-row acct" style="color:var(--text2);">（なし）</div>';
+  }
+  const totalAmount = signed ? fmtSigned(total) : fmt(total);
+  html += `<div class="pl-row sub"><span>${totalLabel}</span><span class="${total >= 0 ? 'pos' : 'neg'}">${totalAmount}</span></div>`;
+  return html;
+}
+
 function renderPL() {
   const baseMonth = getSelectedMonth();
-  const es = mEntries(baseMonth);
-
-  const incRows = [];
-  let incTotal = 0;
-  getAccounts('income', true).forEach(a => {
-    const v = es.filter(e => e.crCat === a).reduce((s,e) => s + e.amount, 0);
-    if (v > 0) { incRows.push({ name:a, val:v }); incTotal += v; }
-  });
-
-  const expRows = [];
-  let expTotal = 0;
-  getAccounts('expense', true).forEach(a => {
-    const v = es.filter(e => e.drCat === a).reduce((s,e) => s + e.amount, 0);
-    if (v > 0) { expRows.push({ name:a, val:v }); expTotal += v; }
-  });
-
-  const profit = incTotal - expTotal;
+  const pl = getPlSectionData(baseMonth);
   let h = '';
-  h += '<div class="pl-row hdr"><span class="badge bi">収入</span></div>';
-  if (incRows.length) incRows.forEach(r => { h += `<div class="pl-row acct"><span>${escapeHtml(r.name)}</span><span class="pos">${fmt(r.val)}</span></div>`; });
-  else h += '<div class="pl-row acct" style="color:var(--text2);">（なし）</div>';
-  h += `<div class="pl-row sub"><span>収入合計</span><span class="pos">${fmt(incTotal)}</span></div>`;
-
-  h += '<div class="pl-row hdr"><span class="badge bx">費用</span></div>';
-  if (expRows.length) expRows.forEach(r => { h += `<div class="pl-row acct"><span>${escapeHtml(r.name)}</span><span class="neg">${fmt(r.val)}</span></div>`; });
-  else h += '<div class="pl-row acct" style="color:var(--text2);">（なし）</div>';
-  h += `<div class="pl-row sub"><span>費用合計</span><span class="neg">${fmt(expTotal)}</span></div>`;
-  h += `<div class="pl-row total"><span><span class="badge bp">当月利益</span></span><span class="${profit >= 0 ? 'pos' : 'neg'}" style="font-size:15px;">${profit < 0 ? '-' : ''}${fmt(profit)}</span></div>`;
+  h += renderPlRows('本業収入', pl.businessRows, pl.businessTotal, 'bi', '本業収入合計');
+  h += renderPlRows('投資損益', pl.investmentRows, pl.investmentTotal, 'bp', '投資損益合計');
+  h += renderPlRows('その他収入', pl.otherIncomeRows, pl.otherIncomeTotal, 'bi', 'その他収入合計');
+  h += renderPlRows('生活費用', pl.livingExpenseRows, pl.livingExpenseTotal, 'bx', '生活費用合計', false);
+  h += `<div class="pl-row total"><span><span class="badge bp">最終利益</span></span><span class="${pl.finalProfit >= 0 ? 'pos' : 'neg'}" style="font-size:15px;">${fmtSigned(pl.finalProfit)}</span></div>`;
 
   document.getElementById('pl-wrap').innerHTML = h;
 
   const months = getMonths(12);
-  const incD = months.map(m => mEntries(m).filter(isIncome).reduce((s,e) => s + e.amount, 0));
-  const expD = months.map(m => mEntries(m).filter(isExpense).reduce((s,e) => s + e.amount, 0));
-  const profD = months.map((_,i) => incD[i] - expD[i]);
+  const monthlyPl = months.map(getPlSectionData);
+  const incD = monthlyPl.map(data => data.businessTotal + data.investmentTotal + data.otherIncomeTotal);
+  const expD = monthlyPl.map(data => data.livingExpenseTotal);
+  const profD = monthlyPl.map(data => data.finalProfit);
 
   document.getElementById('pl-lgd').innerHTML =
     `<span><span class="ldot" style="background:#1D9E75;"></span>収入</span>
