@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#378ADD">
   <link rel="apple-touch-icon" href="icon-192.png">
 
-  <link rel="stylesheet" href="style.css?v=goals-1">
+  <link rel="stylesheet" href="style.css?v=goals-2">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
@@ -521,7 +521,7 @@
     </button>
   </nav>
 
-  <script src="app.js?v=goals-1"></script>
+  <script src="app.js?v=goals-2"></script>
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -532,7 +532,7 @@
         window.location.reload();
       });
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js')
+        navigator.serviceWorker.register('./service-worker.js?v=goals-2')
           .then(registration => registration.update())
           .catch(err => console.error('Service Worker registration failed:', err));
       });

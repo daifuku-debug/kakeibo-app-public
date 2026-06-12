@@ -1,9 +1,9 @@
-const CACHE_NAME = 'kakeibo-pwa-v27';
+const CACHE_NAME = 'kakeibo-pwa-v28';
 const urlsToCache = [
   './',
   './index.html',
-  './style.css?v=goals-1',
-  './app.js?v=goals-1',
+  './style.css?v=goals-2',
+  './app.js?v=goals-2',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -39,15 +39,16 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  if (event.request.mode === 'navigate') {
+  const isFreshAppAsset = url.pathname.endsWith('/app.js') || url.pathname.endsWith('/style.css');
+  if (event.request.mode === 'navigate' || isFreshAppAsset) {
     event.respondWith(
       fetch(event.request)
         .then(response => {
           const copy = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put('./index.html', copy));
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request.mode === 'navigate' ? './index.html' : event.request, copy));
           return response;
         })
-        .catch(() => caches.match('./index.html'))
+        .catch(() => caches.match(event.request.mode === 'navigate' ? './index.html' : event.request))
     );
     return;
   }
