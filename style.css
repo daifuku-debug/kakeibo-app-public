@@ -56,6 +56,25 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
 .financial-level-message{font-size:12px;color:var(--text2);line-height:1.6;}
 .financial-level-card[data-stage="1"] :is(.financial-level-title,.financial-level-main){color:var(--amber-dark);}
 .financial-level-card[data-stage="2"] :is(.financial-level-title,.financial-level-main){color:var(--blue-dark);}
+.goals-card{border-radius:var(--radius);padding:14px;margin-bottom:12px;background:var(--bg);border:1px solid var(--border);}
+.goals-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;}
+.goals-head span{font-size:11px;color:var(--text2);}
+.goals-title{font-size:13px;font-weight:600;}
+.goals-empty{font-size:12px;color:var(--text2);line-height:1.6;padding:4px 0;}
+.goal-item{border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px;margin-top:8px;background:var(--bg2);}
+.goal-item[data-type="debt"]{border-color:rgba(216,90,48,.35);}
+.goal-item[data-type="savings"]{border-color:rgba(29,158,117,.35);}
+.goal-item[data-type="networth"],.goal-item[data-type="custom"]{border-color:rgba(55,138,221,.35);}
+.goal-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.goal-item-head strong{font-size:15px;}
+.goal-name{font-size:13px;font-weight:600;}
+.goal-type{font-size:10px;color:var(--text2);margin-top:2px;}
+.goal-main{font-size:15px;font-weight:600;margin:10px 0 7px;}
+.goal-progress{height:8px;background:var(--bg);border-radius:999px;overflow:hidden;}
+.goal-progress-fill{height:100%;border-radius:999px;background:var(--blue);}
+.goal-item[data-type="debt"] .goal-progress-fill{background:linear-gradient(90deg,var(--red),#EF9F27);}
+.goal-item[data-type="savings"] .goal-progress-fill{background:linear-gradient(90deg,var(--green),var(--blue));}
+.goal-meta{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--text2);margin-top:6px;}
 .household-pace-card{border-radius:var(--radius);padding:14px;margin-bottom:12px;background:var(--bg);border:1px solid var(--border);}
 .household-pace-card[data-status="comfortable"]{background:var(--green-bg);border-color:rgba(29,158,117,.28);}
 .household-pace-card[data-status="over"]{background:var(--red-bg);border-color:rgba(216,90,48,.28);}
@@ -251,6 +270,12 @@ tr.acct td:first-child{padding-left:18px;}
 .acct-add-row{display:flex;gap:8px;padding:12px;border-top:0.5px solid var(--border);background:var(--bg2);}
 .acct-add-row input{flex:1;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:14px;background:var(--bg);color:var(--text);}
 .acct-add-row button{padding:10px 14px;border:none;background:var(--blue);color:#fff;border-radius:var(--radius-sm);font-size:13px;font-weight:600;cursor:pointer;}
+.goal-settings-card{border:1px solid var(--border);}
+.goal-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px;}
+.goal-list{display:grid;gap:8px;margin-top:16px;}
+.goal-settings-row{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg2);}
+.goal-settings-row .goal-meta{display:block;margin-top:3px;}
+.goal-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
 
 .color-dot{width:12px;height:12px;border-radius:999px;border:1px solid var(--border2);display:inline-block;flex-shrink:0;}
 .color-picker{width:36px;height:28px;border:none;background:none;padding:0;cursor:pointer;}
@@ -369,6 +394,9 @@ button:disabled{opacity:.55;cursor:wait;}
 }
 @media (max-width:520px){
   .financial-level-metrics{grid-template-columns:1fr;}
+  .goal-form-grid{grid-template-columns:1fr;}
+  .goal-settings-row{display:block;}
+  .goal-actions{justify-content:flex-start;margin-top:10px;}
   .budget-row{grid-template-columns:1fr;}
   .event-form-grid{grid-template-columns:1fr;}
   .budget-event-metrics{grid-template-columns:1fr;}

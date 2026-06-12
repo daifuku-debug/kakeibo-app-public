@@ -1,9 +1,9 @@
-const CACHE_NAME = 'kakeibo-pwa-v26';
+const CACHE_NAME = 'kakeibo-pwa-v27';
 const urlsToCache = [
   './',
   './index.html',
-  './style.css?v=pl-sections-1',
-  './app.js?v=pl-sections-1',
+  './style.css?v=goals-1',
+  './app.js?v=goals-1',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',

@@ -16,11 +16,13 @@ let monthlyBudgets = loadMonthlyBudgets();
 let monthlyPlans = loadMonthlyPlans();
 let budgetEvents = loadBudgetEvents();
 let financialLevelSettings = loadFinancialLevelSettings();
+let goals = loadGoals();
 let sessionSyncPassphrase = '';
 let budgetMonth = new Date();
 budgetMonth.setDate(1);
 let comparisonMonth = new Date();
 comparisonMonth.setDate(1);
+let editingGoalId = null;
 
 const defaultAccounts = {
   asset: ['現金','交通・電子マネー','SBI新生銀行','住信SBIネット銀行','ゆうちょ銀行','三井住友銀行','楽天銀行','中国銀行','NISA','固定資産','その他資産','ポイント'],
@@ -425,6 +427,17 @@ function loadFinancialLevelSettings() {
 
 function saveFinancialLevelSettings() {
   localStorage.setItem('kakeibo_financial_level_settings', JSON.stringify(financialLevelSettings));
+  markLocalChanged();
+}
+
+function loadGoals() {
+  const raw = JSON.parse(localStorage.getItem('kakeibo_goals') || '[]');
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normalizeGoal).filter(Boolean);
+}
+
+function saveGoals() {
+  localStorage.setItem('kakeibo_goals', JSON.stringify(goals));
   markLocalChanged();
 }
 
@@ -972,6 +985,100 @@ function renderFinancialLevelCard() {
   `;
 }
 
+const GOAL_TYPE_LABELS = {
+  debt:'借金討伐',
+  savings:'貯蓄目標',
+  networth:'純資産目標',
+  custom:'自由目標'
+};
+
+function normalizeGoal(goal) {
+  if (!goal || typeof goal !== 'object') return null;
+  const name = String(goal.name || '').trim();
+  if (!name) return null;
+
+  const type = ['debt', 'savings', 'networth', 'custom'].includes(goal.type) ? goal.type : 'custom';
+  let currentMode = ['account', 'manual', 'networth'].includes(goal.currentMode) ? goal.currentMode : 'manual';
+  if (type === 'networth') currentMode = 'networth';
+
+  const numberOrZero = value => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.round(number) : 0;
+  };
+
+  return {
+    id:String(goal.id || newEntryId()),
+    name,
+    type,
+    startAmount:numberOrZero(goal.startAmount),
+    targetAmount:numberOrZero(goal.targetAmount),
+    currentMode,
+    accountName:currentMode === 'account' ? String(goal.accountName || '') : '',
+    manualCurrentAmount:numberOrZero(goal.manualCurrentAmount),
+    active:goal.active !== false
+  };
+}
+
+function getGoalCurrentAmount(goal) {
+  if (goal.type === 'networth' || goal.currentMode === 'networth') {
+    return getCurrentNetWorth(new Date());
+  }
+  if (goal.currentMode === 'account') {
+    const balance = acctCumul(goal.accountName, new Date());
+    return goal.type === 'debt' ? -balance : balance;
+  }
+  return Number(goal.manualCurrentAmount) || 0;
+}
+
+function getGoalProgressData(goal) {
+  const currentAmount = getGoalCurrentAmount(goal);
+  const denominator = goal.type === 'debt'
+    ? goal.startAmount - goal.targetAmount
+    : goal.targetAmount - goal.startAmount;
+  const numerator = goal.type === 'debt'
+    ? goal.startAmount - currentAmount
+    : currentAmount - goal.startAmount;
+  const rawProgress = denominator === 0 ? (numerator >= 0 ? 100 : 0) : numerator / denominator * 100;
+  const progress = Math.max(0, Math.min(100, Math.round(rawProgress)));
+
+  return {
+    currentAmount,
+    progress,
+    remaining:goal.type === 'debt'
+      ? Math.max(0, currentAmount - goal.targetAmount)
+      : Math.max(0, goal.targetAmount - currentAmount)
+  };
+}
+
+function renderGoalsCard() {
+  const card = document.getElementById('goals-card');
+  if (!card) return;
+  const activeGoals = goals.filter(goal => goal.active);
+  card.innerHTML = `
+    <div class="goals-head"><div class="goals-title">目標</div><span>${activeGoals.length ? `${activeGoals.length}件` : ''}</span></div>
+    ${activeGoals.length ? activeGoals.map(goal => {
+      const data = getGoalProgressData(goal);
+      const main = goal.type === 'debt'
+        ? `残り ${fmt(data.remaining)}`
+        : goal.type === 'networth'
+          ? `現在 ${fmtPlainSigned(data.currentAmount)}`
+          : `${fmt(data.currentAmount)} / ${fmt(goal.targetAmount)}`;
+      const progressLabel = goal.type === 'debt' ? '撃破率' : '進捗';
+      return `
+        <div class="goal-item" data-type="${goal.type}">
+          <div class="goal-item-head">
+            <div><div class="goal-name">${escapeHtml(goal.name)}</div><div class="goal-type">${GOAL_TYPE_LABELS[goal.type]}</div></div>
+            <strong>${data.progress}%</strong>
+          </div>
+          <div class="goal-main">${main}</div>
+          <div class="goal-progress"><div class="goal-progress-fill" style="width:${data.progress}%"></div></div>
+          <div class="goal-meta"><span>${progressLabel} ${data.progress}%</span><span>${data.progress >= 100 ? '目標達成' : `あと ${fmt(data.remaining)}`}</span></div>
+        </div>
+      `;
+    }).join('') : '<div class="goals-empty">借金返済・貯蓄・旅行などを目標として登録すると、ここに進捗ゲージが表示されます。</div>'}
+  `;
+}
+
 function monthKeyFromDate(dateValue) {
   const d = new Date(dateValue);
   if (Number.isNaN(d.getTime())) return '';
@@ -1484,6 +1591,7 @@ function refreshAccountDrivenUI(){
   updateListEventFilterOptions();
   renderQuickCreditButtons();
   renderBudget();
+  renderGoalsCard();
 }
 
 function updateMetrics() {
@@ -1499,6 +1607,7 @@ function updateMetrics() {
   b.textContent = fmtSigned(bal);
   b.style.color = bal >= 0 ? 'var(--green)' : 'var(--red)';
   renderFinancialLevelCard();
+  renderGoalsCard();
   renderHouseholdPaceCard();
 }
 
@@ -2664,7 +2773,7 @@ function guessPreset(entry) {
 function buildBackupPayload() {
   return {
     app:'kakeibo',
-    version:9,
+    version:10,
     exportedAt:new Date().toISOString(),
     entries,
     accountSettings,
@@ -2673,7 +2782,8 @@ function buildBackupPayload() {
     monthlyBudgets,
     monthlyPlans,
     budgetEvents,
-    financialLevelSettings
+    financialLevelSettings,
+    goals
   };
 }
 
@@ -2736,9 +2846,15 @@ function applyBackupPayload(raw) {
     localStorage.setItem('kakeibo_financial_level_settings', JSON.stringify(financialLevelSettings));
   }
 
+  if (Array.isArray(raw.goals)) {
+    goals = raw.goals.map(normalizeGoal).filter(Boolean);
+    localStorage.setItem('kakeibo_goals', JSON.stringify(goals));
+  }
+
   saveEntries();
   cancelEdit(false);
   cancelBudgetEventEdit(false);
+  cancelGoalEdit(false);
   refreshActiveTab();
   refreshAccountDrivenUI();
 }
@@ -3102,6 +3218,172 @@ function normalizeBudgetEvent(event) {
   };
 }
 
+function updateGoalFormOptions(preferredAccount = '') {
+  const typeInput = document.getElementById('goal-type');
+  const modeInput = document.getElementById('goal-current-mode');
+  const accountInput = document.getElementById('goal-account-name');
+  const accountGroup = document.getElementById('goal-account-group');
+  const manualGroup = document.getElementById('goal-manual-group');
+  if (!typeInput || !modeInput || !accountInput || !accountGroup || !manualGroup) return;
+
+  const type = typeInput.value;
+  if (type === 'networth') {
+    modeInput.value = 'networth';
+    modeInput.disabled = true;
+  } else {
+    modeInput.disabled = false;
+    if (modeInput.value === 'networth') modeInput.value = 'account';
+  }
+
+  const mode = modeInput.value;
+  const accountType = type === 'debt' ? 'liability' : 'asset';
+  const accountNames = getAccounts(accountType, true);
+  const selected = preferredAccount || accountInput.value;
+  accountInput.innerHTML = accountNames.length
+    ? accountNames.map(name => `<option${name === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('')
+    : '<option value="">科目がありません</option>';
+  accountGroup.style.display = mode === 'account' ? '' : 'none';
+  manualGroup.style.display = mode === 'manual' ? '' : 'none';
+}
+
+function renderGoalsSettings() {
+  const list = document.getElementById('goal-list');
+  if (!list) return;
+  updateGoalFormOptions();
+
+  list.innerHTML = goals.length
+    ? goals.map(goal => {
+        const data = getGoalProgressData(goal);
+        return `
+          <div class="goal-settings-row" data-type="${goal.type}">
+            <div>
+              <div class="goal-name">${escapeHtml(goal.name)}</div>
+              <div class="goal-meta">${GOAL_TYPE_LABELS[goal.type]} / ${data.progress}% / ${goal.active ? '有効' : '無効'}</div>
+            </div>
+            <div class="goal-actions">
+              <button class="acct-btn" type="button" onclick="editGoal('${escapeJs(goal.id)}')">編集</button>
+              <button class="acct-btn" type="button" onclick="toggleGoalActive('${escapeJs(goal.id)}')">${goal.active ? '無効化' : '有効化'}</button>
+              <button class="acct-btn warn" type="button" onclick="deleteGoal('${escapeJs(goal.id)}')">削除</button>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '<div class="goals-empty">登録済みの目標はありません。</div>';
+}
+
+function saveGoal() {
+  const name = (document.getElementById('goal-name')?.value || '').trim();
+  const type = document.getElementById('goal-type')?.value || 'custom';
+  const startAmount = Number(document.getElementById('goal-start-amount')?.value);
+  const targetAmount = Number(document.getElementById('goal-target-amount')?.value);
+  const currentMode = type === 'networth' ? 'networth' : (document.getElementById('goal-current-mode')?.value || 'manual');
+  const accountName = currentMode === 'account' ? (document.getElementById('goal-account-name')?.value || '') : '';
+  const manualCurrentAmount = Number(document.getElementById('goal-manual-current-amount')?.value || 0);
+
+  if (!name) {
+    alert('目標名を入力してください');
+    return;
+  }
+  if (!Number.isFinite(startAmount) || !Number.isFinite(targetAmount)) {
+    alert('開始額と目標額を入力してください');
+    return;
+  }
+  if (startAmount === targetAmount) {
+    alert('開始額と目標額は異なる金額にしてください');
+    return;
+  }
+  if (type === 'debt' && targetAmount >= startAmount) {
+    alert('借金討伐の目標額は開始額より小さくしてください');
+    return;
+  }
+  if (type !== 'debt' && targetAmount <= startAmount) {
+    alert('目標額は開始額より大きくしてください');
+    return;
+  }
+  if (currentMode === 'account' && !accountName) {
+    alert('勘定科目を選択してください');
+    return;
+  }
+  if (currentMode === 'manual' && !Number.isFinite(manualCurrentAmount)) {
+    alert('手入力の現在値を入力してください');
+    return;
+  }
+
+  const existing = editingGoalId ? goals.find(goal => goal.id === editingGoalId) : null;
+  const normalized = normalizeGoal({
+    id:editingGoalId || newEntryId(),
+    name,
+    type,
+    startAmount,
+    targetAmount,
+    currentMode,
+    accountName,
+    manualCurrentAmount,
+    active:existing?.active !== false
+  });
+  if (existing) {
+    goals = goals.map(goal => goal.id === editingGoalId ? normalized : goal);
+  } else {
+    goals.push(normalized);
+  }
+  saveGoals();
+  cancelGoalEdit(false);
+  renderGoalsSettings();
+  renderGoalsCard();
+}
+
+function editGoal(id) {
+  const goal = goals.find(item => item.id === id);
+  if (!goal) return;
+  editingGoalId = id;
+  document.getElementById('goal-name').value = goal.name;
+  document.getElementById('goal-type').value = goal.type;
+  document.getElementById('goal-start-amount').value = goal.startAmount;
+  document.getElementById('goal-target-amount').value = goal.targetAmount;
+  document.getElementById('goal-current-mode').value = goal.currentMode;
+  document.getElementById('goal-manual-current-amount').value = goal.manualCurrentAmount;
+  document.getElementById('goal-save-btn').textContent = '目標を更新';
+  document.getElementById('goal-cancel-btn').style.display = '';
+  updateGoalFormOptions(goal.accountName);
+}
+
+function cancelGoalEdit(render = true) {
+  editingGoalId = null;
+  ['goal-name', 'goal-start-amount', 'goal-target-amount', 'goal-manual-current-amount'].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = '';
+  });
+  const typeInput = document.getElementById('goal-type');
+  const modeInput = document.getElementById('goal-current-mode');
+  const saveButton = document.getElementById('goal-save-btn');
+  const cancelButton = document.getElementById('goal-cancel-btn');
+  if (typeInput) typeInput.value = 'debt';
+  if (modeInput) modeInput.value = 'account';
+  if (saveButton) saveButton.textContent = '目標を追加';
+  if (cancelButton) cancelButton.style.display = 'none';
+  updateGoalFormOptions();
+  if (render) renderGoalsSettings();
+}
+
+function deleteGoal(id) {
+  const goal = goals.find(item => item.id === id);
+  if (!goal || !confirm(`「${goal.name}」を削除しますか？`)) return;
+  goals = goals.filter(item => item.id !== id);
+  if (editingGoalId === id) cancelGoalEdit(false);
+  saveGoals();
+  renderGoalsSettings();
+  renderGoalsCard();
+}
+
+function toggleGoalActive(id) {
+  const goal = goals.find(item => item.id === id);
+  if (!goal) return;
+  goal.active = !goal.active;
+  saveGoals();
+  renderGoalsSettings();
+  renderGoalsCard();
+}
+
 function renderSettings(){
   const endpointInput = document.getElementById('sync-endpoint');
   const tokenInput = document.getElementById('sync-token');
@@ -3117,6 +3399,7 @@ function renderSettings(){
     startingNetWorthInput.value = Number.isFinite(value) ? value : '';
   }
   renderSyncStatus();
+  renderGoalsSettings();
 
   ['asset','liability','income','expense'].forEach(type => {
     const mount = document.getElementById(`acct-list-${type}`);
