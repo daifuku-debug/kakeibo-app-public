@@ -17,6 +17,7 @@ let monthlyPlans = loadMonthlyPlans();
 let budgetEvents = loadBudgetEvents();
 let financialLevelSettings = loadFinancialLevelSettings();
 let goals = loadGoals();
+let quests = loadQuests();
 let sessionSyncPassphrase = '';
 let budgetMonth = new Date();
 budgetMonth.setDate(1);
@@ -438,6 +439,17 @@ function loadGoals() {
 
 function saveGoals() {
   localStorage.setItem('kakeibo_goals', JSON.stringify(goals));
+  markLocalChanged();
+}
+
+function loadQuests() {
+  const raw = JSON.parse(localStorage.getItem('kakeibo_quests') || '[]');
+  if (!Array.isArray(raw)) return [];
+  return raw.map(normalizeQuest).filter(Boolean);
+}
+
+function saveQuests() {
+  localStorage.setItem('kakeibo_quests', JSON.stringify(quests));
   markLocalChanged();
 }
 
@@ -1079,6 +1091,83 @@ function renderGoalsCard() {
   `;
 }
 
+const QUEST_TYPE_LABELS = {
+  budget:'予算内クエスト',
+  noSpendDays:'ノーマネーデー',
+  manual:'手動クエスト'
+};
+
+function normalizeQuest(quest) {
+  if (!quest || typeof quest !== 'object') return null;
+  const title = String(quest.title || '').trim();
+  if (!title) return null;
+  const type = ['budget', 'noSpendDays', 'manual'].includes(quest.type) ? quest.type : 'manual';
+  const numberOrZero = value => {
+    const number = Number(value);
+    return Number.isFinite(number) ? Math.max(0, Math.round(number)) : 0;
+  };
+
+  return {
+    id:String(quest.id || newEntryId()),
+    title,
+    type,
+    month:String(quest.month || ''),
+    category:String(quest.category || ''),
+    targetAmount:numberOrZero(quest.targetAmount),
+    targetCount:numberOrZero(quest.targetCount),
+    currentValue:numberOrZero(quest.currentValue),
+    completed:quest.completed === true,
+    active:quest.active !== false
+  };
+}
+
+function getQuestProgressData(quest) {
+  let progressRate = 0;
+  let currentText = quest.completed ? '達成済み' : '未達成';
+  if (quest.type === 'budget') {
+    progressRate = quest.targetAmount > 0 ? quest.currentValue / quest.targetAmount * 100 : 0;
+    currentText = `目標 ${fmt(quest.targetAmount)}`;
+  } else if (quest.type === 'noSpendDays') {
+    progressRate = quest.targetCount > 0 ? quest.currentValue / quest.targetCount * 100 : 0;
+    currentText = `${quest.currentValue} / ${quest.targetCount}日`;
+  } else {
+    progressRate = quest.completed ? 100 : 0;
+  }
+
+  return {
+    title:quest.title,
+    type:quest.type,
+    label:QUEST_TYPE_LABELS[quest.type],
+    progressRate:Math.max(0, Math.min(100, Math.round(progressRate))),
+    currentText,
+    completed:quest.completed,
+    active:quest.active
+  };
+}
+
+function renderQuestsCard() {
+  const card = document.getElementById('quests-card');
+  if (!card) return;
+  const activeQuests = quests.filter(quest => quest.active).map(getQuestProgressData);
+  card.innerHTML = `
+    <div class="quests-head"><div class="quests-title">クエスト</div><span>${activeQuests.length ? `${activeQuests.length}件` : ''}</span></div>
+    ${activeQuests.length ? activeQuests.map(quest => {
+      const mainText = quest.type === 'budget' ? `使用率 ${quest.progressRate}%` : quest.currentText;
+      return `
+        <div class="quest-item" data-type="${quest.type}">
+          <div class="quest-item-head">
+            <div><div class="quest-title">${escapeHtml(quest.title)}</div><div class="quest-type">${quest.label}</div></div>
+            <strong>${quest.progressRate}%</strong>
+          </div>
+          <div class="quest-main">${mainText}</div>
+          <div class="quest-progress"><div class="quest-progress-fill" style="width:${quest.progressRate}%"></div></div>
+          <div class="quest-meta"><span>${quest.currentText}</span><span>${quest.completed ? '達成済み' : '進行中'}</span></div>
+        </div>
+      `;
+    }).join('') : '<div class="quests-empty">節約・返済・ノーマネーデーなどをクエストとして登録すると、ここに表示されます。</div>'}
+  `;
+}
+
 function monthKeyFromDate(dateValue) {
   const d = new Date(dateValue);
   if (Number.isNaN(d.getTime())) return '';
@@ -1592,6 +1681,7 @@ function refreshAccountDrivenUI(){
   renderQuickCreditButtons();
   renderBudget();
   renderGoalsCard();
+  renderQuestsCard();
 }
 
 function updateMetrics() {
@@ -1608,6 +1698,7 @@ function updateMetrics() {
   b.style.color = bal >= 0 ? 'var(--green)' : 'var(--red)';
   renderFinancialLevelCard();
   renderGoalsCard();
+  renderQuestsCard();
   renderHouseholdPaceCard();
 }
 
@@ -2773,7 +2864,7 @@ function guessPreset(entry) {
 function buildBackupPayload() {
   return {
     app:'kakeibo',
-    version:10,
+    version:11,
     exportedAt:new Date().toISOString(),
     entries,
     accountSettings,
@@ -2783,7 +2874,8 @@ function buildBackupPayload() {
     monthlyPlans,
     budgetEvents,
     financialLevelSettings,
-    goals
+    goals,
+    quests
   };
 }
 
@@ -2849,6 +2941,11 @@ function applyBackupPayload(raw) {
   if (Array.isArray(raw.goals)) {
     goals = raw.goals.map(normalizeGoal).filter(Boolean);
     localStorage.setItem('kakeibo_goals', JSON.stringify(goals));
+  }
+
+  if (Array.isArray(raw.quests)) {
+    quests = raw.quests.map(normalizeQuest).filter(Boolean);
+    localStorage.setItem('kakeibo_quests', JSON.stringify(quests));
   }
 
   saveEntries();

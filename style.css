@@ -75,6 +75,25 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
 .goal-item[data-type="debt"] .goal-progress-fill{background:linear-gradient(90deg,var(--red),#EF9F27);}
 .goal-item[data-type="savings"] .goal-progress-fill{background:linear-gradient(90deg,var(--green),var(--blue));}
 .goal-meta{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--text2);margin-top:6px;}
+.quests-card{border-radius:var(--radius);padding:14px;margin-bottom:12px;background:var(--bg);border:1px solid var(--border);}
+.quests-head{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;}
+.quests-head span{font-size:11px;color:var(--text2);}
+.quests-title{font-size:13px;font-weight:600;}
+.quests-empty{font-size:12px;color:var(--text2);line-height:1.6;padding:4px 0;}
+.quest-item{border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px;margin-top:8px;background:var(--bg2);}
+.quest-item[data-type="budget"]{border-color:rgba(55,138,221,.35);}
+.quest-item[data-type="noSpendDays"]{border-color:rgba(29,158,117,.35);}
+.quest-item[data-type="manual"]{border-color:rgba(83,58,183,.35);}
+.quest-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.quest-item-head strong{font-size:15px;}
+.quest-title{font-size:13px;font-weight:600;}
+.quest-type{font-size:10px;color:var(--text2);margin-top:2px;}
+.quest-main{font-size:15px;font-weight:600;margin:10px 0 7px;}
+.quest-progress{height:8px;background:var(--bg);border-radius:999px;overflow:hidden;}
+.quest-progress-fill{height:100%;border-radius:999px;background:var(--blue);}
+.quest-item[data-type="noSpendDays"] .quest-progress-fill{background:var(--green);}
+.quest-item[data-type="manual"] .quest-progress-fill{background:linear-gradient(90deg,#533AB7,#EF9F27);}
+.quest-meta{display:flex;justify-content:space-between;gap:8px;font-size:10px;color:var(--text2);margin-top:6px;}
 .household-pace-card{border-radius:var(--radius);padding:14px;margin-bottom:12px;background:var(--bg);border:1px solid var(--border);}
 .household-pace-card[data-status="comfortable"]{background:var(--green-bg);border-color:rgba(29,158,117,.28);}
 .household-pace-card[data-status="over"]{background:var(--red-bg);border-color:rgba(216,90,48,.28);}
