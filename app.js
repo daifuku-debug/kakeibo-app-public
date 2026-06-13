@@ -1125,12 +1125,30 @@ function normalizeQuest(quest) {
 function getQuestProgressData(quest) {
   let progressRate = 0;
   let currentText = quest.completed ? '達成済み' : '未達成';
+  let status = quest.completed ? 'completed' : 'active';
+  let statusLabel = quest.completed ? '達成済み' : '進行中';
+  let overAmount = 0;
   if (quest.type === 'budget') {
     progressRate = quest.targetAmount > 0 ? quest.currentValue / quest.targetAmount * 100 : 0;
-    currentText = `目標 ${fmt(quest.targetAmount)}`;
+    currentText = `目標 ${fmt(quest.targetAmount)} / 使用 ${fmt(quest.currentValue)}`;
+    overAmount = Math.max(0, quest.currentValue - quest.targetAmount);
+    if (overAmount > 0) {
+      status = 'over';
+      statusLabel = '超過';
+    } else if (quest.completed) {
+      status = 'completed';
+      statusLabel = '達成済み';
+    } else if (quest.month === monthKeyFromMonth(new Date())) {
+      status = 'likely';
+      statusLabel = '達成見込み';
+    }
   } else if (quest.type === 'noSpendDays') {
     progressRate = quest.targetCount > 0 ? quest.currentValue / quest.targetCount * 100 : 0;
     currentText = `${quest.currentValue} / ${quest.targetCount}日`;
+    if (quest.currentValue >= quest.targetCount && quest.targetCount > 0) {
+      status = 'completed';
+      statusLabel = '達成済み';
+    }
   } else {
     progressRate = quest.completed ? 100 : 0;
   }
@@ -1142,27 +1160,95 @@ function getQuestProgressData(quest) {
     progressRate:Math.max(0, Math.min(100, Math.round(progressRate))),
     currentText,
     completed:quest.completed,
-    active:quest.active
+    active:quest.active,
+    status,
+    statusLabel,
+    overAmount
   };
+}
+
+function getQuestMonthEntries(monthKey) {
+  if (!/^\d{4}-\d{2}$/.test(monthKey || '')) return [];
+  return entries.filter(entry => monthKeyFromDate(entry.date) === monthKey);
+}
+
+function calculateBudgetQuestProgress(quest) {
+  const currentValue = getQuestMonthEntries(quest.month)
+    .filter(entry => isExpense(entry) && entry.drCat === quest.category)
+    .reduce((sum, entry) => sum + entry.amount, 0);
+  const currentMonth = monthKeyFromMonth(new Date());
+  return {
+    currentValue,
+    completed:/^\d{4}-\d{2}$/.test(quest.month || '') &&
+      quest.month < currentMonth &&
+      quest.targetAmount > 0 &&
+      currentValue <= quest.targetAmount
+  };
+}
+
+function calculateNoSpendDaysQuestProgress(quest) {
+  if (!/^\d{4}-\d{2}$/.test(quest.month || '')) return { currentValue:0, completed:false };
+  const [year, month] = quest.month.split('-').map(Number);
+  const currentMonth = monthKeyFromMonth(new Date());
+  if (quest.month > currentMonth) return { currentValue:0, completed:false };
+
+  const lastDay = new Date(year, month, 0).getDate();
+  const endDay = quest.month === currentMonth ? new Date().getDate() : lastDay;
+  const spendingDays = new Set(
+    getQuestMonthEntries(quest.month)
+      .filter(isExpense)
+      .map(entry => Number(String(entry.date).slice(8, 10)))
+      .filter(day => day >= 1 && day <= endDay)
+  );
+  const currentValue = Math.max(0, endDay - spendingDays.size);
+  return {
+    currentValue,
+    completed:quest.targetCount > 0 && currentValue >= quest.targetCount
+  };
+}
+
+function calculateManualQuestProgress(quest) {
+  return { currentValue:quest.currentValue, completed:quest.completed };
+}
+
+function updateQuestAutoProgress() {
+  let changed = false;
+  quests.forEach(quest => {
+    const calculated = quest.type === 'budget'
+      ? calculateBudgetQuestProgress(quest)
+      : quest.type === 'noSpendDays'
+        ? calculateNoSpendDaysQuestProgress(quest)
+        : calculateManualQuestProgress(quest);
+    if (quest.currentValue !== calculated.currentValue || quest.completed !== calculated.completed) {
+      quest.currentValue = calculated.currentValue;
+      quest.completed = calculated.completed;
+      changed = true;
+    }
+  });
+  if (changed) saveQuests();
+  return changed;
 }
 
 function renderQuestsCard() {
   const card = document.getElementById('quests-card');
   if (!card) return;
+  updateQuestAutoProgress();
   const activeQuests = quests.filter(quest => quest.active).map(getQuestProgressData);
   card.innerHTML = `
     <div class="quests-head"><div class="quests-title">クエスト</div><span>${activeQuests.length ? `${activeQuests.length}件` : ''}</span></div>
     ${activeQuests.length ? activeQuests.map(quest => {
-      const mainText = quest.type === 'budget' ? `使用率 ${quest.progressRate}%` : quest.currentText;
+      const mainText = quest.type === 'budget'
+        ? quest.overAmount > 0 ? `超過 ${fmt(quest.overAmount)}` : `使用率 ${quest.progressRate}%`
+        : quest.currentText;
       return `
-        <div class="quest-item" data-type="${quest.type}">
+        <div class="quest-item" data-type="${quest.type}" data-status="${quest.status}">
           <div class="quest-item-head">
             <div><div class="quest-title">${escapeHtml(quest.title)}</div><div class="quest-type">${quest.label}</div></div>
-            <strong>${quest.progressRate}%</strong>
+            <span class="quest-status">${quest.statusLabel}</span>
           </div>
           <div class="quest-main">${mainText}</div>
           <div class="quest-progress"><div class="quest-progress-fill" style="width:${quest.progressRate}%"></div></div>
-          <div class="quest-meta"><span>${quest.currentText}</span><span>${quest.completed ? '達成済み' : '進行中'}</span></div>
+          <div class="quest-meta"><span>${quest.currentText}</span><span>${quest.progressRate}%</span></div>
         </div>
       `;
     }).join('') : '<div class="quests-empty">節約・返済・ノーマネーデーなどをクエストとして登録すると、ここに表示されます。</div>'}
@@ -1816,6 +1902,7 @@ function delEntry(id) {
   const targetIds = new Set(targets.map(e => e.id));
   entries = entries.filter(e => !targetIds.has(e.id));
   saveEntries();
+  updateQuestAutoProgress();
   if (targetIds.has(editingId)) cancelEdit(false);
   refreshActiveTab();
   renderSettings();
@@ -2772,6 +2859,7 @@ function addEntry() {
       entries.push({ ...original, ...data, preset:currentPreset, entryType, linkedId:undefined, pointRole:undefined });
     }
     saveEntries();
+    updateQuestAutoProgress();
     cancelEdit(false);
     refreshActiveTab();
     renderQuickCreditButtons();
@@ -2785,6 +2873,7 @@ function addEntry() {
     entries.push({ id:newEntryId(), ...data });
   }
   saveEntries();
+  updateQuestAutoProgress();
   refreshActiveTab();
   resetForm();
   applyLastUsedForm();
@@ -2950,6 +3039,7 @@ function applyBackupPayload(raw) {
   }
 
   saveEntries();
+  updateQuestAutoProgress();
   cancelEdit(false);
   cancelBudgetEventEdit(false);
   cancelGoalEdit(false);
@@ -3490,6 +3580,9 @@ function updateQuestFormOptions(preferredCategory = '') {
   const amountGroup = document.getElementById('quest-target-amount-group');
   const countGroup = document.getElementById('quest-target-count-group');
   const countLabel = document.getElementById('quest-target-count-label');
+  const currentInput = document.getElementById('quest-current-value');
+  const completedInput = document.getElementById('quest-completed');
+  const autoNote = document.getElementById('quest-auto-note');
   if (!typeInput || !categoryInput || !categoryGroup || !amountGroup || !countGroup || !countLabel) return;
 
   const type = typeInput.value;
@@ -3502,12 +3595,21 @@ function updateQuestFormOptions(preferredCategory = '') {
   amountGroup.style.display = type === 'budget' ? '' : 'none';
   countGroup.style.display = type === 'budget' ? 'none' : '';
   countLabel.textContent = type === 'noSpendDays' ? '目標日数' : '目標回数';
+  const automatic = type !== 'manual';
+  if (currentInput) currentInput.disabled = automatic;
+  if (completedInput) completedInput.disabled = automatic;
+  if (autoNote) {
+    autoNote.textContent = automatic
+      ? '現在値と達成状態は取引データから自動計算されます。'
+      : '手動クエストは現在値と達成状態を自由に更新できます。';
+  }
 }
 
 function renderQuestsSettings() {
   const list = document.getElementById('quest-settings-list');
   const monthInput = document.getElementById('quest-month');
   if (!list) return;
+  updateQuestAutoProgress();
   if (monthInput && !monthInput.value) monthInput.value = monthKeyFromMonth(new Date());
   updateQuestFormOptions();
 
@@ -3826,6 +3928,7 @@ function escapeJs(str){
 
 setPreset(uiPrefs.lastPreset || 'expense');
 document.getElementById('f-date').value = formatLocalDate(new Date());
+updateQuestAutoProgress();
 updateMetrics();
 renderSettings();
 renderEventOptions('');

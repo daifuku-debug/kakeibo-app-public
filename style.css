@@ -84,8 +84,14 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Helvetica Neue',sans-serif;ba
 .quest-item[data-type="budget"]{border-color:rgba(55,138,221,.35);}
 .quest-item[data-type="noSpendDays"]{border-color:rgba(29,158,117,.35);}
 .quest-item[data-type="manual"]{border-color:rgba(83,58,183,.35);}
+.quest-item[data-status="over"]{background:var(--red-bg);border-color:rgba(216,90,48,.4);}
+.quest-item[data-status="completed"]{background:var(--green-bg);border-color:rgba(29,158,117,.4);}
 .quest-item-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
 .quest-item-head strong{font-size:15px;}
+.quest-status{font-size:10px;font-weight:600;padding:3px 8px;border-radius:999px;background:var(--bg);color:var(--text2);white-space:nowrap;}
+.quest-item[data-status="over"] .quest-status{color:var(--red-dark);}
+.quest-item[data-status="completed"] .quest-status{color:var(--green-dark);}
+.quest-item[data-status="likely"] .quest-status{color:var(--blue-dark);}
 .quest-title{font-size:13px;font-weight:600;}
 .quest-type{font-size:10px;color:var(--text2);margin-top:2px;}
 .quest-main{font-size:15px;font-weight:600;margin:10px 0 7px;}
