@@ -295,6 +295,18 @@ tr.acct td:first-child{padding-left:18px;}
 .goal-settings-row{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg2);}
 .goal-settings-row .goal-meta{display:block;margin-top:3px;}
 .goal-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;}
+.quest-settings-card{border:1px solid var(--border);}
+.quest-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 10px;}
+.quest-settings-list{display:grid;gap:8px;margin-top:16px;}
+.quest-settings-item{border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;background:var(--bg2);}
+.quest-settings-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.quest-settings-head strong{font-size:13px;}
+.quest-settings-meta{font-size:10px;color:var(--text2);margin-top:3px;line-height:1.5;}
+.quest-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;}
+.quest-editbar{display:none;margin-bottom:12px;padding:10px 12px;border-radius:var(--radius-sm);background:var(--amber-bg);color:var(--amber-dark);font-size:12px;font-weight:600;}
+.quest-editbar.show{display:block;}
+.quest-checkbox{display:flex!important;align-items:center;gap:8px;min-height:42px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg2);color:var(--text)!important;font-size:13px!important;}
+.quest-checkbox input{width:auto!important;margin:0;}
 
 .color-dot{width:12px;height:12px;border-radius:999px;border:1px solid var(--border2);display:inline-block;flex-shrink:0;}
 .color-picker{width:36px;height:28px;border:none;background:none;padding:0;cursor:pointer;}
@@ -416,6 +428,7 @@ button:disabled{opacity:.55;cursor:wait;}
   .goal-form-grid{grid-template-columns:1fr;}
   .goal-settings-row{display:block;}
   .goal-actions{justify-content:flex-start;margin-top:10px;}
+  .quest-form-grid{grid-template-columns:1fr;}
   .budget-row{grid-template-columns:1fr;}
   .event-form-grid{grid-template-columns:1fr;}
   .budget-event-metrics{grid-template-columns:1fr;}

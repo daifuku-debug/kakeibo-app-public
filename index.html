@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#378ADD">
   <link rel="apple-touch-icon" href="icon-192.png">
 
-  <link rel="stylesheet" href="style.css?v=quests-1">
+  <link rel="stylesheet" href="style.css?v=quests-settings-1">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
@@ -406,6 +406,59 @@
       <div id="goal-list" class="goal-list"></div>
     </div>
 
+    <div class="card quest-settings-card">
+      <div class="lhdr" style="margin-bottom:10px;">
+        <span class="lhdr-title">クエスト設定</span>
+      </div>
+      <div class="hint" style="margin-bottom:16px;">
+        節約・ノーマネーデー・手動達成のクエストを作成し、現在値を更新できます。
+      </div>
+      <div id="quest-editbar" class="quest-editbar"></div>
+      <div class="quest-form-grid">
+        <div class="fgrp">
+          <label>タイトル</label>
+          <input type="text" id="quest-title" placeholder="クエスト名を入力">
+        </div>
+        <div class="fgrp">
+          <label>種類</label>
+          <select id="quest-type" onchange="updateQuestFormOptions()">
+            <option value="budget">予算内クエスト</option>
+            <option value="noSpendDays">ノーマネーデー</option>
+            <option value="manual">手動クエスト</option>
+          </select>
+        </div>
+        <div class="fgrp">
+          <label>対象月</label>
+          <input type="month" id="quest-month">
+        </div>
+        <div class="fgrp" id="quest-category-group">
+          <label>費目</label>
+          <select id="quest-category"></select>
+        </div>
+        <div class="fgrp" id="quest-target-amount-group">
+          <label>目標金額（円）</label>
+          <input type="number" id="quest-target-amount" inputmode="numeric" placeholder="0" min="1">
+        </div>
+        <div class="fgrp" id="quest-target-count-group">
+          <label id="quest-target-count-label">目標回数/日数</label>
+          <input type="number" id="quest-target-count" inputmode="numeric" placeholder="1" min="1">
+        </div>
+        <div class="fgrp">
+          <label>現在値</label>
+          <input type="number" id="quest-current-value" inputmode="numeric" placeholder="0" min="0">
+        </div>
+        <div class="fgrp">
+          <label>達成状態</label>
+          <label class="quest-checkbox"><input type="checkbox" id="quest-completed"> 達成済み</label>
+        </div>
+      </div>
+      <div class="sub-actions">
+        <button class="btnsub" id="quest-submit" type="button" onclick="saveQuest()">クエストを追加</button>
+        <button class="btnsub" id="quest-cancel" type="button" onclick="cancelQuestEdit(true)" style="display:none;">編集をキャンセル</button>
+      </div>
+      <div id="quest-settings-list" class="quest-settings-list"></div>
+    </div>
+
     <div class="card">
       <div class="lhdr" style="margin-bottom:10px;">
         <span class="lhdr-title">外部サーバー保存</span>
@@ -523,7 +576,7 @@
     </button>
   </nav>
 
-  <script src="app.js?v=quests-1"></script>
+  <script src="app.js?v=quests-settings-1"></script>
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -534,7 +587,7 @@
         window.location.reload();
       });
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js?v=quests-1')
+        navigator.serviceWorker.register('./service-worker.js?v=quests-settings-1')
           .then(registration => registration.update())
           .catch(err => console.error('Service Worker registration failed:', err));
       });

@@ -24,6 +24,7 @@ budgetMonth.setDate(1);
 let comparisonMonth = new Date();
 comparisonMonth.setDate(1);
 let editingGoalId = null;
+let editingQuestId = null;
 
 const defaultAccounts = {
   asset: ['現金','交通・電子マネー','SBI新生銀行','住信SBIネット銀行','ゆうちょ銀行','三井住友銀行','楽天銀行','中国銀行','NISA','固定資産','その他資産','ポイント'],
@@ -2952,6 +2953,7 @@ function applyBackupPayload(raw) {
   cancelEdit(false);
   cancelBudgetEventEdit(false);
   cancelGoalEdit(false);
+  cancelQuestEdit(false);
   refreshActiveTab();
   refreshAccountDrivenUI();
 }
@@ -3481,6 +3483,164 @@ function toggleGoalActive(id) {
   renderGoalsCard();
 }
 
+function updateQuestFormOptions(preferredCategory = '') {
+  const typeInput = document.getElementById('quest-type');
+  const categoryInput = document.getElementById('quest-category');
+  const categoryGroup = document.getElementById('quest-category-group');
+  const amountGroup = document.getElementById('quest-target-amount-group');
+  const countGroup = document.getElementById('quest-target-count-group');
+  const countLabel = document.getElementById('quest-target-count-label');
+  if (!typeInput || !categoryInput || !categoryGroup || !amountGroup || !countGroup || !countLabel) return;
+
+  const type = typeInput.value;
+  const categories = getAccounts('expense', true);
+  const selected = preferredCategory || categoryInput.value;
+  categoryInput.innerHTML = categories.length
+    ? categories.map(name => `<option${name === selected ? ' selected' : ''}>${escapeHtml(name)}</option>`).join('')
+    : '<option value="">費目がありません</option>';
+  categoryGroup.style.display = type === 'budget' ? '' : 'none';
+  amountGroup.style.display = type === 'budget' ? '' : 'none';
+  countGroup.style.display = type === 'budget' ? 'none' : '';
+  countLabel.textContent = type === 'noSpendDays' ? '目標日数' : '目標回数';
+}
+
+function renderQuestsSettings() {
+  const list = document.getElementById('quest-settings-list');
+  const monthInput = document.getElementById('quest-month');
+  if (!list) return;
+  if (monthInput && !monthInput.value) monthInput.value = monthKeyFromMonth(new Date());
+  updateQuestFormOptions();
+
+  list.innerHTML = quests.length
+    ? quests.map(quest => {
+        const data = getQuestProgressData(quest);
+        return `
+          <div class="quest-settings-item" data-type="${quest.type}">
+            <div class="quest-settings-head">
+              <div>
+                <div class="quest-title">${escapeHtml(quest.title)}</div>
+                <div class="quest-settings-meta">${data.label} / ${escapeHtml(quest.month || '月未設定')} / ${data.currentText} / ${quest.active ? '有効' : '無効'}</div>
+              </div>
+              <strong>${data.progressRate}%</strong>
+            </div>
+            <div class="quest-actions">
+              <button class="acct-btn" type="button" onclick="editQuest('${escapeJs(quest.id)}')">編集</button>
+              <button class="acct-btn" type="button" onclick="toggleQuestActive('${escapeJs(quest.id)}')">${quest.active ? '無効化' : '有効化'}</button>
+              <button class="acct-btn warn" type="button" onclick="deleteQuest('${escapeJs(quest.id)}')">削除</button>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '<div class="quests-empty">登録済みのクエストはありません。</div>';
+}
+
+function saveQuest() {
+  const title = (document.getElementById('quest-title')?.value || '').trim();
+  const type = document.getElementById('quest-type')?.value || 'manual';
+  const month = document.getElementById('quest-month')?.value || monthKeyFromMonth(new Date());
+  const category = type === 'budget' ? (document.getElementById('quest-category')?.value || '') : '';
+  const targetAmount = Number(document.getElementById('quest-target-amount')?.value || 0);
+  const targetCountValue = Number(document.getElementById('quest-target-count')?.value || 1);
+  const currentValue = Number(document.getElementById('quest-current-value')?.value || 0);
+  const completed = document.getElementById('quest-completed')?.checked === true;
+  if (!title) {
+    alert('クエストのタイトルを入力してください');
+    return;
+  }
+  if (type === 'budget' && (!Number.isFinite(targetAmount) || targetAmount <= 0)) {
+    alert('予算内クエストの目標金額を入力してください');
+    return;
+  }
+
+  const existing = editingQuestId ? quests.find(quest => quest.id === editingQuestId) : null;
+  const normalized = normalizeQuest({
+    id:editingQuestId || newEntryId(),
+    title,
+    type,
+    month,
+    category,
+    targetAmount:type === 'budget' ? targetAmount : 0,
+    targetCount:type === 'budget' ? 0 : (Number.isFinite(targetCountValue) && targetCountValue > 0 ? targetCountValue : 1),
+    currentValue:Number.isFinite(currentValue) && currentValue >= 0 ? currentValue : 0,
+    completed,
+    active:existing?.active !== false
+  });
+  const wasEditing = Boolean(existing);
+  if (existing) {
+    quests = quests.map(quest => quest.id === editingQuestId ? normalized : quest);
+  } else {
+    quests.push(normalized);
+  }
+  saveQuests();
+  cancelQuestEdit(false);
+  renderQuestsCard();
+  renderQuestsSettings();
+  alert(wasEditing ? 'クエストを更新しました' : 'クエストを追加しました');
+}
+
+function editQuest(id) {
+  const quest = quests.find(item => item.id === id);
+  if (!quest) return;
+  editingQuestId = id;
+  document.getElementById('quest-title').value = quest.title;
+  document.getElementById('quest-type').value = quest.type;
+  document.getElementById('quest-month').value = quest.month || monthKeyFromMonth(new Date());
+  document.getElementById('quest-target-amount').value = quest.targetAmount || '';
+  document.getElementById('quest-target-count').value = quest.targetCount || '';
+  document.getElementById('quest-current-value').value = quest.currentValue || 0;
+  document.getElementById('quest-completed').checked = quest.completed;
+  document.getElementById('quest-submit').textContent = 'クエストを更新';
+  document.getElementById('quest-cancel').style.display = '';
+  const editbar = document.getElementById('quest-editbar');
+  editbar.classList.add('show');
+  editbar.textContent = `編集中: ${quest.title}`;
+  updateQuestFormOptions(quest.category);
+}
+
+function cancelQuestEdit(showAlert = false) {
+  editingQuestId = null;
+  ['quest-title', 'quest-target-amount', 'quest-target-count', 'quest-current-value'].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = '';
+  });
+  const typeInput = document.getElementById('quest-type');
+  const monthInput = document.getElementById('quest-month');
+  const completedInput = document.getElementById('quest-completed');
+  const submit = document.getElementById('quest-submit');
+  const cancel = document.getElementById('quest-cancel');
+  const editbar = document.getElementById('quest-editbar');
+  if (typeInput) typeInput.value = 'budget';
+  if (monthInput) monthInput.value = monthKeyFromMonth(new Date());
+  if (completedInput) completedInput.checked = false;
+  if (submit) submit.textContent = 'クエストを追加';
+  if (cancel) cancel.style.display = 'none';
+  if (editbar) {
+    editbar.classList.remove('show');
+    editbar.textContent = '';
+  }
+  updateQuestFormOptions();
+  if (showAlert) alert('クエスト編集をキャンセルしました');
+}
+
+function deleteQuest(id) {
+  const quest = quests.find(item => item.id === id);
+  if (!quest || !confirm(`「${quest.title}」を削除しますか？`)) return;
+  quests = quests.filter(item => item.id !== id);
+  if (editingQuestId === id) cancelQuestEdit(false);
+  saveQuests();
+  renderQuestsCard();
+  renderQuestsSettings();
+}
+
+function toggleQuestActive(id) {
+  const quest = quests.find(item => item.id === id);
+  if (!quest) return;
+  quest.active = !quest.active;
+  saveQuests();
+  renderQuestsCard();
+  renderQuestsSettings();
+}
+
 function renderSettings(){
   const endpointInput = document.getElementById('sync-endpoint');
   const tokenInput = document.getElementById('sync-token');
@@ -3497,6 +3657,7 @@ function renderSettings(){
   }
   renderSyncStatus();
   renderGoalsSettings();
+  renderQuestsSettings();
 
   ['asset','liability','income','expense'].forEach(type => {
     const mount = document.getElementById(`acct-list-${type}`);
