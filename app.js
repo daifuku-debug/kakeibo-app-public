@@ -30,7 +30,7 @@ const defaultAccounts = {
   asset: ['現金','交通・電子マネー','SBI新生銀行','住信SBIネット銀行','ゆうちょ銀行','三井住友銀行','楽天銀行','中国銀行','NISA','固定資産','その他資産','ポイント'],
   liability: ['クレジットカード','奨学金','Paidy','消費者金融','その他負債'],
   income: ['給与','賞与','配当金','雑収入','銀行利息','評価益','プラス帳尻合わせ'],
-  expense: ['食費','日用品費','家賃','水道代','ガス代','電気代','交通費','通信費','娯楽費','外食費','自己投資','沙奈費','交際費','旅費','被服費','美容費','保険','医療費','特別費','生活費','雑費','仕送り','税金等','評価損','マイナス帳尻合わせ']
+  expense: ['食費','日用品費','家賃','水道代','ガス代','電気代','交通費','立替交通費','通信費','娯楽費','外食費','自己投資','沙奈費','交際費','旅費','被服費','美容費','保険','医療費','特別費','生活費','雑費','仕送り','税金等','評価損','マイナス帳尻合わせ']
 };
 
 const defaultExpenseColors = {
@@ -41,6 +41,7 @@ const defaultExpenseColors = {
   ガス代:'#BA7517',
   電気代:'#EF9F27',
   交通費:'#0F6E56',
+  立替交通費:'#185FA5',
   通信費:'#D4537E',
   娯楽費:'#D85A30',
   外食費:'#993C1D',
@@ -69,6 +70,7 @@ const defaultExpenseCostTypes = {
   ガス代:'fixed',
   電気代:'fixed',
   交通費:'variable',
+  立替交通費:'variable',
   通信費:'fixed',
   娯楽費:'variable',
   外食費:'variable',
@@ -93,6 +95,7 @@ const POINT_ASSET_ACCOUNT = 'ポイント';
 const POINT_ADJUSTMENT_INCOME = 'プラス帳尻合わせ';
 const INVESTMENT_GAIN_INCOME = '評価益';
 const INVESTMENT_LOSS_EXPENSE = '評価損';
+const TEMPORARY_TRANSPORT_EXPENSE = '立替交通費';
 const POINT_ROLE_ADJUSTMENT = 'point-adjustment';
 const POINT_ROLE_EXPENSE = 'point-expense';
 const OPENING_BALANCE_EQUITY = '開始残高調整';
@@ -178,7 +181,7 @@ function loadAccountSettings(){
     asset: ensureAccount(normalizeAccountBlock(raw.asset || defaultAccounts.asset, 'asset'), 'asset', POINT_ASSET_ACCOUNT),
     liability: normalizeAccountBlock(raw.liability || defaultAccounts.liability, 'liability'),
     income: ensureAccounts(normalizeAccountBlock(raw.income || defaultAccounts.income, 'income'), 'income', [POINT_ADJUSTMENT_INCOME, INVESTMENT_GAIN_INCOME]),
-    expense: ensureAccounts(normalizeAccountBlock(raw.expense || defaultAccounts.expense, 'expense'), 'expense', [INVESTMENT_LOSS_EXPENSE])
+    expense: ensureAccounts(normalizeAccountBlock(raw.expense || defaultAccounts.expense, 'expense'), 'expense', [INVESTMENT_LOSS_EXPENSE, TEMPORARY_TRANSPORT_EXPENSE])
   };
 }
 
@@ -838,6 +841,10 @@ function isExpense(e) {
   return !isOpeningEntry(e) && getAccounts('expense', true).includes(e.drCat);
 }
 
+function isNoSpendDayExpense(e) {
+  return isExpense(e) && e.drCat !== TEMPORARY_TRANSPORT_EXPENSE;
+}
+
 function isLiabilityRepayment(e) {
   return !isOpeningEntry(e) &&
     getAccounts('liability', true).includes(e.drCat) &&
@@ -1196,7 +1203,7 @@ function calculateNoSpendDaysQuestProgress(quest) {
   const endDay = quest.month === currentMonth ? new Date().getDate() : lastDay;
   const spendingDays = new Set(
     getQuestMonthEntries(quest.month)
-      .filter(isExpense)
+      .filter(isNoSpendDayExpense)
       .map(entry => Number(String(entry.date).slice(8, 10)))
       .filter(day => day >= 1 && day <= endDay)
   );
@@ -2979,10 +2986,10 @@ function applyBackupPayload(raw) {
   entries = normalized;
   if (raw.accountSettings) {
     accountSettings = {
-      asset: normalizeAccountBlock(raw.accountSettings.asset, 'asset'),
+      asset: ensureAccount(normalizeAccountBlock(raw.accountSettings.asset, 'asset'), 'asset', POINT_ASSET_ACCOUNT),
       liability: normalizeAccountBlock(raw.accountSettings.liability, 'liability'),
-      income: normalizeAccountBlock(raw.accountSettings.income, 'income'),
-      expense: normalizeAccountBlock(raw.accountSettings.expense, 'expense')
+      income: ensureAccounts(normalizeAccountBlock(raw.accountSettings.income, 'income'), 'income', [POINT_ADJUSTMENT_INCOME, INVESTMENT_GAIN_INCOME]),
+      expense: ensureAccounts(normalizeAccountBlock(raw.accountSettings.expense, 'expense'), 'expense', [INVESTMENT_LOSS_EXPENSE, TEMPORARY_TRANSPORT_EXPENSE])
     };
     saveAccountSettings();
   }
