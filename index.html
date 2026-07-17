@@ -337,26 +337,72 @@
   </div>
 
   <div id="t-settings" class="sec">
-    <div class="card">
-      <div class="lhdr" style="margin-bottom:10px;">
-        <span class="lhdr-title">財務レベル設定</span>
-      </div>
-      <div class="hint" style="margin-bottom:16px;">
-        家計簿を始めた時点の純資産を設定すると、借金返済・資産形成の進捗をレベル表示します。
-      </div>
-      <div class="fgrp">
-        <label>開始純資産（円）</label>
-        <input type="number" id="financial-starting-net-worth" inputmode="numeric" placeholder="-4000000">
-      </div>
-      <div class="sub-actions">
-        <button class="btnsub" type="button" onclick="saveFinancialLevelConfig()">財務レベル設定を保存</button>
-      </div>
-    </div>
+    <details class="card settings-section" open>
+      <summary class="settings-section-summary">
+        <span class="lhdr-title">外部サーバー保存</span>
+        <span class="settings-section-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="settings-section-body">
+        <div class="hint" style="margin-bottom:16px;">
+          Cloudflare Workers + KV に暗号化済みデータを保存・復元します。暗号化パスフレーズはこの端末に保存しません。
+        </div>
 
-    <div class="card goal-settings-card">
-      <div class="lhdr" style="margin-bottom:10px;">
-        <span class="lhdr-title">目標設定</span>
+        <div class="fgrp">
+          <label>Cloudflare Worker URL</label>
+          <input type="url" id="sync-endpoint" placeholder="https://example.workers.dev">
+        </div>
+
+        <div class="fgrp">
+          <label>アクセストークン</label>
+          <input type="password" id="sync-token" placeholder="Cloudflare Workerに設定したトークン">
+        </div>
+
+        <div class="fgrp">
+          <label>暗号化パスフレーズ</label>
+          <input type="password" id="sync-passphrase" placeholder="保存・読込時だけ入力">
+        </div>
+
+        <div class="form-note">
+          パスフレーズはタブを開いている間だけ記憶されます。忘れるとサーバーのデータを復元できません。
+        </div>
+
+        <div id="sync-status" class="sync-status"></div>
+
+        <div class="sub-actions">
+          <button class="btnsub" type="button" data-sync-action onclick="saveSyncConfig()">設定を保存</button>
+          <button class="btnsub" type="button" data-sync-action onclick="uploadToServer()">サーバーへ保存</button>
+        </div>
+        <div class="sub-actions">
+          <button class="btnsub" type="button" data-sync-action onclick="downloadFromServer()">サーバーから読み込む</button>
+        </div>
       </div>
+    </details>
+
+    <details class="card settings-section">
+      <summary class="settings-section-summary">
+        <span class="lhdr-title">財務レベル設定</span>
+        <span class="settings-section-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="settings-section-body">
+        <div class="hint" style="margin-bottom:16px;">
+          家計簿を始めた時点の純資産を設定すると、借金返済・資産形成の進捗をレベル表示します。
+        </div>
+        <div class="fgrp">
+          <label>開始純資産（円）</label>
+          <input type="number" id="financial-starting-net-worth" inputmode="numeric" placeholder="-4000000">
+        </div>
+        <div class="sub-actions">
+          <button class="btnsub" type="button" onclick="saveFinancialLevelConfig()">財務レベル設定を保存</button>
+        </div>
+      </div>
+    </details>
+
+    <details class="card settings-section goal-settings-card">
+      <summary class="settings-section-summary">
+        <span class="lhdr-title">目標設定</span>
+        <span class="settings-section-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="settings-section-body">
       <div class="hint" style="margin-bottom:16px;">
         借金返済・貯蓄・旅行・純資産などの目標を、残高連動または手入力で管理できます。
       </div>
@@ -404,12 +450,15 @@
         <button class="btnsub" id="goal-cancel-btn" type="button" onclick="cancelGoalEdit()" style="display:none;">編集をキャンセル</button>
       </div>
       <div id="goal-list" class="goal-list"></div>
-    </div>
-
-    <div class="card quest-settings-card">
-      <div class="lhdr" style="margin-bottom:10px;">
-        <span class="lhdr-title">クエスト設定</span>
       </div>
+    </details>
+
+    <details class="card settings-section quest-settings-card">
+      <summary class="settings-section-summary">
+        <span class="lhdr-title">クエスト設定</span>
+        <span class="settings-section-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="settings-section-body">
       <div class="hint" style="margin-bottom:16px;">
         節約・ノーマネーデー・手動達成のクエストを作成し、現在値を更新できます。
       </div>
@@ -458,50 +507,15 @@
         <button class="btnsub" id="quest-cancel" type="button" onclick="cancelQuestEdit(true)" style="display:none;">編集をキャンセル</button>
       </div>
       <div id="quest-settings-list" class="quest-settings-list"></div>
-    </div>
-
-    <div class="card">
-      <div class="lhdr" style="margin-bottom:10px;">
-        <span class="lhdr-title">外部サーバー保存</span>
       </div>
-      <div class="hint" style="margin-bottom:16px;">
-        Cloudflare Workers + KV に暗号化済みデータを保存・復元します。暗号化パスフレーズはこの端末に保存しません。
-      </div>
+    </details>
 
-      <div class="fgrp">
-        <label>Cloudflare Worker URL</label>
-        <input type="url" id="sync-endpoint" placeholder="https://example.workers.dev">
-      </div>
-
-      <div class="fgrp">
-        <label>アクセストークン</label>
-        <input type="password" id="sync-token" placeholder="Cloudflare Workerに設定したトークン">
-      </div>
-
-      <div class="fgrp">
-        <label>暗号化パスフレーズ</label>
-        <input type="password" id="sync-passphrase" placeholder="保存・読込時だけ入力">
-      </div>
-
-      <div class="form-note">
-        パスフレーズはタブを開いている間だけ記憶されます。忘れるとサーバーのデータを復元できません。
-      </div>
-
-      <div id="sync-status" class="sync-status"></div>
-
-      <div class="sub-actions">
-        <button class="btnsub" type="button" data-sync-action onclick="saveSyncConfig()">設定を保存</button>
-        <button class="btnsub" type="button" data-sync-action onclick="uploadToServer()">サーバーへ保存</button>
-      </div>
-      <div class="sub-actions">
-        <button class="btnsub" type="button" data-sync-action onclick="downloadFromServer()">サーバーから読み込む</button>
-      </div>
-    </div>
-
-    <div class="card">
-      <div class="lhdr" style="margin-bottom:10px;">
+    <details class="card settings-section">
+      <summary class="settings-section-summary">
         <span class="lhdr-title">勘定科目の管理</span>
-      </div>
+        <span class="settings-section-chevron" aria-hidden="true"></span>
+      </summary>
+      <div class="settings-section-body">
       <div class="hint" style="margin-bottom:16px;">
         使っていない科目は削除、過去の記録で使っている科目は無効化されます。<br>
         無効化した科目は過去データには残り、新規入力候補からは消えます。資産・負債の色は支払方法別グラフに、費用の色はカテゴリ表示に使われます。
@@ -544,7 +558,8 @@
           </div>
         </div>
       </div>
-    </div>
+      </div>
+    </details>
   </div>
 
   <nav class="tab-bar">
