@@ -12,7 +12,7 @@
   <meta name="theme-color" content="#378ADD">
   <link rel="apple-touch-icon" href="icon-192.png">
 
-  <link rel="stylesheet" href="style.css?v=quests-auto-2">
+  <link rel="stylesheet" href="style.css?v=event-month-filter-1">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 </head>
 <body>
@@ -256,10 +256,10 @@
 
     <div class="card">
       <div class="lhdr" style="margin-bottom:10px;">
-        <span class="lhdr-title">旅行・イベント予算</span>
+        <span class="lhdr-title" id="budget-event-month-label">旅行・イベント予算</span>
       </div>
       <div class="hint" style="margin-bottom:16px;">
-        旅行ごとの予算を作って、支出入力時に紐づけると使用額と残額を追えます。
+        選択中の月に該当するイベントだけを表示します。旅行ごとの予算を作って、支出入力時に紐づけると使用額と残額を追えます。
       </div>
 
       <div class="event-form-grid">
@@ -592,7 +592,7 @@
     </button>
   </nav>
 
-  <script src="app.js?v=quests-auto-2"></script>
+  <script src="app.js?v=event-month-filter-1"></script>
 
   <script>
     if ('serviceWorker' in navigator) {
@@ -603,7 +603,7 @@
         window.location.reload();
       });
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js?v=quests-auto-2')
+        navigator.serviceWorker.register('./service-worker.js?v=event-month-filter-1')
           .then(registration => registration.update())
           .catch(err => console.error('Service Worker registration failed:', err));
       });

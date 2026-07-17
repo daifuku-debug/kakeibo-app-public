@@ -547,10 +547,11 @@ function renderEventOptions(selectedId = '') {
   const sel = document.getElementById('f-event');
   if (!sel) return;
   const dateValue = document.getElementById('f-date')?.value || '';
+  const visibleEvents = getBudgetEventsForDateValue(dateValue);
   const matches = [];
   const others = [];
 
-  budgetEvents
+  visibleEvents
     .slice()
     .sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')) || a.name.localeCompare(b.name, 'ja'))
     .forEach(event => {
@@ -570,11 +571,11 @@ function renderEventOptions(selectedId = '') {
     parts.push(`<optgroup label="日付に合うイベント">${matches.map(eventOption).join('')}</optgroup>`);
   }
   if (others.length) {
-    parts.push(`<optgroup label="その他のイベント">${others.map(eventOption).join('')}</optgroup>`);
+    parts.push(`<optgroup label="同じ月のその他のイベント">${others.map(eventOption).join('')}</optgroup>`);
   }
   sel.innerHTML = parts.join('');
 
-  const availableIds = budgetEvents.map(event => event.id);
+  const availableIds = visibleEvents.map(event => event.id);
   if (selectedId && availableIds.includes(selectedId)) {
     sel.value = selectedId;
   } else {
@@ -583,6 +584,36 @@ function renderEventOptions(selectedId = '') {
   }
 
   renderEventHint();
+}
+
+function isBudgetEventInMonth(event, monthDate) {
+  const monthKey = monthKeyFromMonth(monthDate);
+  const startDate = event.startDate || event.endDate || '';
+  const endDate = event.endDate || event.startDate || '';
+
+  if (!startDate && !endDate) {
+    const assignedMonth = /^\d{4}-\d{2}$/.test(event.month || '')
+      ? event.month
+      : monthKeyFromMonth(new Date());
+    return assignedMonth === monthKey;
+  }
+
+  const nextMonth = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
+  const monthStart = `${monthKey}-01`;
+  const nextMonthStart = `${monthKeyFromMonth(nextMonth)}-01`;
+  return startDate < nextMonthStart && endDate >= monthStart;
+}
+
+function getBudgetEventsForMonth(monthDate) {
+  return budgetEvents.filter(event => isBudgetEventInMonth(event, monthDate));
+}
+
+function getBudgetEventsForDateValue(dateValue) {
+  const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(dateValue || '');
+  const monthDate = match
+    ? new Date(Number(match[1]), Number(match[2]) - 1, 1)
+    : new Date();
+  return getBudgetEventsForMonth(monthDate);
 }
 
 function isEventDateMatch(event, dateValue) {
@@ -594,7 +625,8 @@ function isEventDateMatch(event, dateValue) {
 
 function getSuggestedEventId(dateValue) {
   if (!dateValue) return '';
-  const matched = budgetEvents.filter(event => isEventDateMatch(event, dateValue));
+  const matched = getBudgetEventsForDateValue(dateValue)
+    .filter(event => isEventDateMatch(event, dateValue));
   return matched.length === 1 ? matched[0].id : '';
 }
 
@@ -610,7 +642,8 @@ function renderEventHint() {
   }
 
   const selected = getBudgetEvent(sel.value);
-  const matched = budgetEvents.filter(event => isEventDateMatch(event, dateValue));
+  const matched = getBudgetEventsForDateValue(dateValue)
+    .filter(event => isEventDateMatch(event, dateValue));
 
   if (selected) {
     if (dateValue && !isEventDateMatch(selected, dateValue)) {
@@ -2053,6 +2086,7 @@ function renderGraph() {
 function renderBudget() {
   const monthKey = monthKeyFromMonth(budgetMonth);
   const budget = getMonthlyBudget(monthKey);
+  const monthEvents = getBudgetEventsForMonth(budgetMonth);
   const totals = getMonthBudgetTotals(budgetMonth);
   const actualByCategory = {};
   mEntries(budgetMonth)
@@ -2063,6 +2097,8 @@ function renderBudget() {
 
   const monthLabel = document.getElementById('budget-month-label');
   if (monthLabel) monthLabel.textContent = `${formatMonthLabel(budgetMonth)} の予算`;
+  const eventMonthLabel = document.getElementById('budget-event-month-label');
+  if (eventMonthLabel) eventMonthLabel.textContent = `${formatMonthLabel(budgetMonth)} の旅行・イベント予算`;
 
   renderHouseholdPlan();
   renderFoodPaceCard();
@@ -2124,10 +2160,10 @@ function renderBudget() {
 
   const eventList = document.getElementById('budget-event-list');
   if (eventList) {
-    if (!budgetEvents.length) {
-      eventList.innerHTML = '<div class="budget-empty">イベント予算はまだありません</div>';
+    if (!monthEvents.length) {
+      eventList.innerHTML = `<div class="budget-empty">${escapeHtml(formatMonthLabel(budgetMonth))} のイベント予算はありません</div>`;
     } else {
-      eventList.innerHTML = budgetEvents
+      eventList.innerHTML = monthEvents
         .slice()
         .sort((a, b) => String(a.startDate || '').localeCompare(String(b.startDate || '')) || a.name.localeCompare(b.name, 'ja'))
         .map(event => {
@@ -2184,6 +2220,7 @@ function renderBudget() {
 }
 
 function changeBudgetMonth(offset) {
+  cancelBudgetEventEdit(false);
   budgetMonth.setMonth(budgetMonth.getMonth() + offset);
   renderBudget();
 }
@@ -2283,6 +2320,7 @@ function clearBudgetMonth() {
 
 function saveBudgetEvent() {
   const isEditing = Boolean(editingBudgetEventId);
+  const existing = editingBudgetEventId ? getBudgetEvent(editingBudgetEventId) : null;
   const name = (document.getElementById('budget-event-name')?.value || '').trim();
   const amount = Number(document.getElementById('budget-event-amount')?.value || 0);
   const startDate = document.getElementById('budget-event-start')?.value || '';
@@ -2306,7 +2344,8 @@ function saveBudgetEvent() {
     name,
     budget: Math.round(amount),
     startDate,
-    endDate
+    endDate,
+    month: existing?.month || monthKeyFromMonth(budgetMonth)
   };
 
   budgetEvents = budgetEvents.filter(event => event.id !== payload.id);
@@ -3410,7 +3449,8 @@ function normalizeBudgetEvent(event) {
     name,
     budget:Math.round(budget),
     startDate:String(event.startDate || ''),
-    endDate:String(event.endDate || '')
+    endDate:String(event.endDate || ''),
+    month:/^\d{4}-\d{2}$/.test(String(event.month || '')) ? String(event.month) : ''
   };
 }
 
